@@ -1,0 +1,20 @@
+{
+  "name": "自主学 · 用自己的内容学英语",
+  "short_name": "自主学",
+  "description": "导入你自己的真实对话、字幕、截图，自动生成听读材料、生词卡和每日复习。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./#/",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f4ef",
+  "theme_color": "#1f6f5c",
+  "categories": ["education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
