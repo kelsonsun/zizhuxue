@@ -4,6 +4,9 @@ import * as tts from './tts.js';
 import { $, $$, esc, toast, sheet, go } from './ui.js';
 import { loadSettings, seedIfFirstRun, session } from './state.js';
 
+import * as tour from './tour.js';
+import { mountPill } from './transui.js';
+import { job } from './translate.js';
 const routes = {
   '': () => import('./views/home.js'),
   import: () => import('./views/import.js'),
@@ -59,14 +62,40 @@ document.addEventListener('click', e => {
 
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); session.install = e; window.dispatchEvent(new Event('installready')); });
 
+// 自动更新：新版本的 Service Worker 装好后接管页面（不动 IndexedDB 里的数据）。
+// 没有在做事（录音、翻译、编辑、复习作答、输入）时自动刷新到新版本；否则在顶部提示，用户点一下再刷新。
+function busy() {
+  return job.running || !!document.querySelector('.recording, .backdrop, #tour, .tour-modal') || /^#\/(draft|review|import)/.test(location.hash) || !!document.activeElement?.matches?.('input, textarea');
+}
+function showUpdateBar() {
+  if (document.getElementById('updbar')) return;
+  const b = document.createElement('div'); b.id = 'updbar'; b.className = 'updbar'; b.innerHTML = '✨ 新版本已就绪（你的数据不受影响）<button class="btn primary mini2" id="updNow">现在刷新</button>';
+  document.body.appendChild(b); b.querySelector('#updNow').onclick = () => location.reload();
+}
+function setupUpdates() {
+  const had = !!navigator.serviceWorker.controller; let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!had || reloading) return; // 第一次安装时不刷新
+    const apply = () => { if (busy()) { showUpdateBar(); return; } reloading = true; location.reload(); };
+    apply();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => reg.update().catch(() => { });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(e => console.warn('SW', e));
+}
+
 async function boot() {
   shell();
   await loadSettings(); await ai.loadConfig(); await seedIfFirstRun();
   window.addEventListener('hashchange', render);
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+  if ('serviceWorker' in navigator) setupUpdates();
+  mountPill();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if (db.storageMode === 'memory') toast('提示：此浏览器禁用了本地存储，关闭页面后数据会丢失', 6000);
   await render();
   document.documentElement.dataset.ready = '1';
+  tour.boot().catch(e => console.warn('tour', e));
 }
 boot();

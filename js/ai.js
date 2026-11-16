@@ -144,3 +144,13 @@ export async function explainSense(term, sentence, senses) {
   if (idx < 0 && !meaning) throw new AIError('AI 没有给出可用的义项判断', 'BAD_FORMAT');
   return { index: idx, meaning, reason: str(r?.reason), examples, at: Date.now() };
 }
+
+/** 【逐句翻译】texts: string[]，dir: 'en2zh'|'zh2en'。返回等长译文数组；条数不对或缺项视为失败。 */
+export async function translateBatch(texts, dir) {
+  const to = dir === 'en2zh' ? '简体中文（自然、准确，保留人名地名）' : '地道自然的英文（适合中国学习者模仿，保留意思、数字和否定关系）';
+  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
+    `【逐句翻译】把下面 JSON 数组里的每一句分别译成${to}。一句对一句，不要合并、拆分或省略。\n${JSON.stringify(texts)}\n返回 JSON：{"t":["第1句译文","第2句译文",...]}，数组长度必须是 ${texts.length}。` }], { temperature: 0.2 });
+  const t = Array.isArray(r?.t) ? r.t.map(str) : [];
+  if (t.length !== texts.length || t.some(x => !x)) throw new AIError('AI 返回的译文条数不对，请重试', 'BAD_FORMAT');
+  return t;
+}

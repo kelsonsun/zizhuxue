@@ -41,6 +41,13 @@ function splitSeparator(line) {
 /** 解析粘贴文本 → [{speaker, en, zh}]。支持：每行「中文 | English」、中英交替行、纯英文段落、带说话人前缀。 */
 export function parseBilingual(raw) {
   let lines = String(raw || '').replace(/\r/g, '').split('\n').map(s => s.trim()).filter(Boolean).map(stripBullet).filter(Boolean);
+  // 纯英文 / 纯中文文件：把硬换行（上一行没有句末标点）接回同一段，避免把半句当成一句
+  const langs = lines.map(lang).filter(l => l !== 'other'); const mono = langs.length && langs.every(l => l === langs[0]) ? langs[0] : null;
+  if (mono && !lines.some(l => SPEAKER_RE.test(l))) {
+    const END = mono === 'zh' ? /[。！？!?；…”』」）)]$/ : /[.!?…"”’)\]:]$/; const joined = [];
+    for (const l of lines) { const prev = joined[joined.length - 1]; if (prev != null && !END.test(prev) && !(mono === 'en' && /^[A-Z]/.test(l) && prev.length < 60)) joined[joined.length - 1] = prev + (mono === 'zh' ? '' : ' ') + l; else joined.push(l); }
+    lines = joined;
+  }
   // 说话人前缀（出现≥2次或属于常见称谓才认定，避免把 “Note: xxx” 当说话人）
   const cand = lines.map(l => { const m = l.match(SPEAKER_RE); return m ? m[1].trim() : null; });
   const cnt = {}; cand.forEach(c => { if (c) cnt[c.toLowerCase()] = (cnt[c.toLowerCase()] || 0) + 1; });
@@ -66,7 +73,7 @@ export function parseBilingual(raw) {
         i++; continue;
       }
     }
-    if (L === 'zh') out.push({ speaker, en: '', zh: text });
+    if (L === 'zh') splitChinese(text).forEach((z, k) => out.push({ speaker: k ? '' : speaker, en: '', zh: z }));
     else if (L === 'en') splitEnglish(text).forEach((e, k) => out.push({ speaker: k ? '' : speaker, en: e, zh: '' }));
   }
   return out;
@@ -134,8 +141,8 @@ export function tokenize(s) {
  * 注意：ref 里保留原词的大小写与标点用于显示。 */
 export function compareWords(ref, hyp) {
   const rawRef = String(ref || '').split(/\s+/).filter(Boolean);
-  const refTok = rawRef.map(w => tokenize(w).join(' ')).map(x => x);
-  const items = rawRef.map((w, i) => ({ show: w, norm: refTok[i] })).filter(x => x.norm);
+  // 带连字符的词（follow-up）拆成几个记号，与作答的拆法一致；显示时再合并回原词
+  const items = rawRef.flatMap(w => tokenize(w).map((t, k) => ({ show: k ? '' : w, norm: t })));
   const hy = tokenize(hyp);
   const n = items.length, m = hy.length;
   const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
@@ -162,6 +169,7 @@ export function compareWords(ref, hyp) {
   }
   if (i < n || j < m) gap(n, m);
   const ok = tokens.filter(t => t.status === 'ok').length;
+  for (let k = tokens.length - 1; k > 0; k--) if (tokens[k].w === '') { const a = tokens[k - 1], b = tokens[k]; if (a.status !== b.status) a.status = a.status === 'miss' && b.status === 'miss' ? 'miss' : 'wrong'; if (b.heard) a.heard = [a.heard, b.heard].filter(Boolean).join(' '); tokens.splice(k, 1); }
   const score = n ? Math.max(0, Math.round(100 * (ok - extra.length * 0.5) / n)) : 0;
   return { score, tokens, extra, total: n, correct: ok };
 }

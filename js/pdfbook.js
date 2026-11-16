@@ -1,7 +1,7 @@
 // 整本 PDF 书籍导入：本地 pdf.js 解析（vendor），按目录/章节标题/页数自动切章，分批处理并报告进度；
 // 没有文字层的扫描页自动走本地 Tesseract OCR（较慢）。全程不联网。
 import { ocrImage } from './importers.js';
-import { splitEnglish } from './textproc.js';
+import { splitEnglish, splitChinese, lang } from './textproc.js';
 
 const abs = p => new URL(p, document.baseURI).href;
 let libp = null;
@@ -16,7 +16,7 @@ function loadPdfLib() {
   return libp;
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
-const TERMINAL = /[.!?…"”’)\]:]$/;
+const TERMINAL = /[.!?…"”’)\]:。！？；]$/;
 
 export async function openPdf(file) {
   const lib = await loadPdfLib();
@@ -59,7 +59,7 @@ async function pageParas(page) {
 }
 function joinLines(ls) {
   let out = '';
-  for (const l of ls) { if (!out) out = l; else if (/[a-z]-$/.test(out) && /^[a-z]/.test(l)) out = out.slice(0, -1) + l; else out += ' ' + l; }
+  for (const l of ls) { if (!out) out = l; else if (/[a-z]-$/.test(out) && /^[a-z]/.test(l)) out = out.slice(0, -1) + l; else if (/[\u3400-\u9fff，。、；：！？）]$/.test(out) || /^[\u3400-\u9fff，。、；：！？（]/.test(l)) out += l; else out += ' ' + l; }
   return out.trim();
 }
 async function ocrPage(page) {
@@ -120,7 +120,9 @@ export async function readOutline(pdf) {
   return items.map(({ title, page }) => ({ title, page }));
 }
 
-const HEAD = /^(chapter|part|book|section|stave|letter|act)\s+([ivxlcdm]+|\d+|[a-z]+)\b[.:\s-]*/i;
+const HEAD_EN = /^(chapter|part|book|section|stave|letter|act)\s+([ivxlcdm]+|\d+|[a-z]+)\b[.:\s-]*/i;
+const HEAD_ZH = /^第\s*[一二三四五六七八九十百千零〇两\d]+\s*[章回节卷部篇]/;
+const HEAD = { test: t => HEAD_EN.test(t) || HEAD_ZH.test(t) };
 const norm = t => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 /** 按页面段落切章。返回 {method, chapters:[{title, from, to, paras}]}。 */
@@ -168,8 +170,10 @@ export function splitChapters(pages, outline, { chunk = 10 } = {}) {
 /** 段落[] → 句子[]（带段号 p）。跨页断开的句子在 splitChapters 前不处理，这里把“未结束的段落+小写开头的下一段”合并。 */
 export function parasToSentences(paras) {
   const merged = [];
-  for (const t of paras) { const prev = merged[merged.length - 1]; if (prev && !TERMINAL.test(prev) && /^[a-z]/.test(t)) merged[merged.length - 1] = prev + ' ' + t; else merged.push(t); }
+  for (const t of paras) { const prev = merged[merged.length - 1]; if (prev && ((!TERMINAL.test(prev) && /^[a-z]/.test(t)) || (lang(prev) === 'zh' && lang(t) === 'zh' && !/[。！？…”』」]$/.test(prev)))) merged[merged.length - 1] = prev + ' ' + t; else merged.push(t); }
   const out = []; let p = 0;
-  for (const para of merged) { const ss = splitEnglish(para).filter(s => /[A-Za-z]{2}/.test(s)); if (!ss.length) continue; for (const s of ss) out.push({ en: s, zh: '', speaker: '', p }); p++; }
+  for (const para of merged) {
+    if (lang(para) === 'zh') { const zs = splitChinese(para); if (!zs.length) continue; for (const z of zs) out.push({ en: '', zh: z, speaker: '', p }); p++; continue; } // 中文书：中文原文，英文待翻译
+    const ss = splitEnglish(para).filter(s => /[A-Za-z]{2}/.test(s)); if (!ss.length) continue; for (const s of ss) out.push({ en: s, zh: '', speaker: '', p }); p++; }
   return out;
 }
