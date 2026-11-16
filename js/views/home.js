@@ -30,7 +30,7 @@ export async function render(root) {
   <h2>最近的材料</h2>
   <div class="list">${top.slice(0, 4).map(m => `<a class="item" href="${m.kind === 'book' ? '#/book/' : '#/lesson/'}${m.id}"><b>${m.kind === 'book' ? '📖 ' : ''}${esc(m.title)}</b><span class="muted">${m.kind === 'book' ? mats.filter(x => x.bookId === m.id).length + ' 章' : m.sentences.length + ' 句'} · ${fmtDate(m.updatedAt)}${m.sample ? ' · 示例' : ''}</span></a>`).join('') || '<p class="muted">暂无材料</p>'}</div>
   <div id="installBox"></div>
-  <p class="muted small privacy">🔒 你的内容只保存在这台设备的浏览器里，不上传到任何服务器。</p>`;
+  <p class="muted small privacy">🔒 你的内容只保存在这台设备的浏览器里。只有你主动使用 AI 或确认使用公共翻译时，相关句子才会发出去。</p>`;
   const box = $('#installBox', root);
   const draw = () => {
     if (isStandalone()) { box.innerHTML = ''; return; }

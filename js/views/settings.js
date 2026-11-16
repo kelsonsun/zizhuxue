@@ -3,6 +3,10 @@ import * as ai from '../ai.js';
 import { LocalOnlyAdapter } from '../sync.js';
 import { settings, saveSettings, seedIfFirstRun, sampleMaterial } from '../state.js';
 import { $, esc, toast, confirmDlg, download, go } from '../ui.js';
+import * as tour from '../tour.js';
+import { chromeStatus } from '../translate.js';
+import { isIosStandalone } from './review.js';
+import * as sp from '../speech.js';
 
 const OFFLINE_ASSETS = ['vendor/tesseract/tesseract.min.js', 'vendor/tesseract/worker.min.js', 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js', 'vendor/tesseract/core/tesseract-core-lstm.wasm.js', 'vendor/tesseract/lang/eng.traineddata.gz', 'vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/mammoth/mammoth.browser.min.js'];
 
@@ -21,7 +25,17 @@ export async function render(root) {
 
   <section class="card"><h2>学习设置</h2>
     <div class="field"><label for="nl">每天新卡上限</label><select id="nl">${[5, 10, 20, 30].map(n => `<option ${settings.newLimit === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    <label class="check"><input type="checkbox" id="asr" ${settings.useAsr ? 'checked' : ''}> 跟读时用浏览器语音识别打分（关掉则只录音回放）</label></section>
+    <label class="check"><input type="checkbox" id="asr" ${settings.useAsr ? 'checked' : ''}> 跟读和复习「说出来」时用浏览器语音识别转文字判分（关掉则只录音回放 + 自评）</label>
+    <p class="muted small" id="asrinfo">语音识别：${!sp.asrSupported() ? '这个浏览器没有。' : isIosStandalone() ? 'iPhone 主屏应用里苹果不提供（即使接口存在也不工作），已自动改为录音回放 + 自评。用 Safari 浏览器打开本站则可用（需开启 Siri，语音交给苹果服务器识别）。' : '可用（由浏览器厂商的服务识别，仅供参考）。'}</p>
+    ${isIosStandalone() && sp.asrSupported() ? `<label class="check"><input type="checkbox" id="fasr" ${settings.forceAsr ? 'checked' : ''}> 在主屏应用里也尝试语音识别（若无反应会自动改为自评）</label>` : ''}
+    <button class="btn" id="tourAgain">🧭 重新观看新手引导</button></section>
+
+  <section class="card"><h2>翻译（给纯英文/纯中文材料配对照）</h2>
+    <p class="muted small">导入纯英文或纯中文的文件后，可以一键配上翻译。三种真实通道，按需选择：</p>
+    <ul class="small"><li><b>AI</b>：用上面配置的接口，质量最好；${ai.isConfigured() ? '已配置。' : '<b>未配置</b>。'}</li>
+      <li><b>浏览器内置翻译</b>：电脑版 Chrome 138+ / Edge 148+ 在本机翻译、不上传；iPhone 上的所有浏览器都没有。当前浏览器：<span id="csnow">检测中…</span></li>
+      <li><b>MyMemory 公共翻译</b>：免费、免注册、iPhone 可用；内容会发给第三方 MyMemory（Translated 公司），每次使用前会让你确认。匿名约 5000 字符/天，填一个邮箱可到约 50000 字符/天（邮箱会随请求发给 MyMemory，不是注册）。</li></ul>
+    <div class="field"><label for="mme">MyMemory 联系邮箱（可选）</label><input id="mme" type="email" value="${esc(settings.mmEmail || '')}" placeholder="不填则匿名使用" autocomplete="email"></div></section>
 
   <section class="card"><h2>数据与备份</h2>
     <p class="muted small">所有材料、卡片和复习进度都保存在本设备。备份文件是 JSON（不含 AI 密钥和录音），可用来换设备或防丢。</p>
@@ -39,9 +53,10 @@ export async function render(root) {
   <section class="card"><h2>隐私</h2><ul class="small">
     <li>内容只存在本机浏览器，没有账号、没有服务器。</li>
     <li>只有你点「AI」按钮时，相关句子才会发到你配置的 AI 服务。</li>
+    <li>只有你确认使用「MyMemory 公共翻译」时，要翻译的句子才会发给 MyMemory。</li>
     <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></section>
 
-  <section class="card"><h2>关于</h2><p class="muted small">自主学 v1.0 · 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
+  <section class="card"><h2>关于</h2><p class="muted small">自主学 v1.1（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
   const E = id => $(id, root);
   const read = () => ({ baseUrl: E('#ab').value, apiKey: E('#ak').value, model: E('#am').value });
   const refresh = () => { E('#aist').textContent = ai.isConfigured() ? '已配置' : '未配置'; E('#aist').classList.toggle('okt', ai.isConfigured()); };
@@ -53,6 +68,11 @@ export async function render(root) {
     m.textContent = '测试中…'; try { await ai.testConnection(); m.textContent = '✓ 连接成功，AI 可以使用。'; } catch (e) { m.textContent = '✗ ' + e.message; }
   };
   E('#nl').onchange = e => saveSettings({ newLimit: +e.target.value });
+  E('#fasr')?.addEventListener('change', e => saveSettings({ forceAsr: e.target.checked }));
+  E('#tourAgain').onclick = () => tour.start();
+  E('#mme').onchange = e => { const v = e.target.value.trim(); if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('邮箱格式不对'); saveSettings({ mmEmail: v }); toast(v ? '已保存：MyMemory 额度约 50000 字符/天' : '已清除，匿名使用'); };
+  chromeStatus('en2zh').then(st => { E('#csnow').textContent = { available: '可用（语言包已下载）', downloadable: '可用（首次需下载语言包）', downloading: '可用（语言包下载中）', unavailable: '不可用', none: '不支持' }[st] || st; });
+  fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
   E('#asr').onchange = e => saveSettings({ useAsr: e.target.checked });
   E('#exp').onclick = async () => { download(`自主学备份_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await db.exportAll(), null, 1)); toast('已导出（不含 AI 密钥）'); };
   const doImport = (mode) => async (e) => {

@@ -8,6 +8,8 @@ import { $, $$, esc, go, toast, sheet, confirmDlg, wordsHtml, tokensOf } from '.
 import { onLeave } from '../app.js';
 import { paragraphs, paraIndexOf, progressOf, markDone, touchLast, isBook } from '../structure.js';
 import { openWordSheet, openPractice, toggleStar } from '../tools.js';
+import { openTranslate, statusHtml } from '../transui.js';
+import { SHORT } from '../translate.js';
 
 const LEVELS = [['chapter', '章'], ['para', '段'], ['sent', '句'], ['word', '词']];
 
@@ -42,7 +44,7 @@ export async function render(root, [id], params = {}) {
       <div class="sent ${m.progress?.done?.[s.id] ? 'done' : ''}" data-i="${i}">
         <button class="pbtn" data-play aria-label="播放第${i + 1}句">▶</button>
         <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}<div class="en">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文，请编辑补上）</span>'}</div>
-          <div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div></div>
+          <div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div>${s.tr ? `<div class="trtag">${s.orig === 'zh' ? '中文原文 · 英文为' : ''}${esc(SHORT[s.tr] || '机器翻译')}，可编辑</div>` : ''}</div>
         <div class="sact"><button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button><button class="mini" data-practice>练习</button></div>
       </div>`;
   const loopLabel = lv === 'chapter' ? '🔁 整篇循环' : lv === 'para' ? '🔁 循环本段' : '🔁 循环';
@@ -97,7 +99,7 @@ export async function render(root, [id], params = {}) {
     root.innerHTML = `
     <header class="top"><a class="back" href="${book ? '#/book/' + book.id : '#/library'}" aria-label="返回">‹</a><h1>${esc(m.title)}</h1>
       <span class="muted">${N} 句 · ${cs.length} 张卡${m.tags?.length ? ' · ' + esc(m.tags.join(' / ')) : ''}</span></header>
-    ${levelBar()}${audioUrl ? audioPanel() : ''}${body}
+    ${levelBar()}${lv === 'chapter' && !book ? await statusHtml([m.id], m) : ''}${audioUrl ? audioPanel() : ''}${body}
     ${lv === 'chapter' ? `<h2>本课工具</h2><div class="grid2">
       <a class="btn" href="#/quiz/lesson:${m.id}">📝 测验</a><button class="btn" id="autoWords">🔎 自动选生词（离线词典）</button>${aiBtn('aiCards', '生成词卡')}
       <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button></div>` : ''}`;
@@ -164,6 +166,7 @@ export async function render(root, [id], params = {}) {
   };
 
   const bind = () => {
+    $('#trBtn', root)?.addEventListener('click', () => openTranslate({ ids: [m.id], title: m.title, onDone: async () => { m = await db.materials.get(m.id); draw(); } }));
     au = null;
     $('#playAll', root)?.addEventListener('click', () => run(lv === 'chapter' || lv === 'para' ? range[0] : si, lv === 'chapter' || lv === 'para'));
     $('#stop', root)?.addEventListener('click', stopAll);

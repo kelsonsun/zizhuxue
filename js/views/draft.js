@@ -2,6 +2,8 @@ import * as db from '../db.js';
 import * as ai from '../ai.js';
 import { session, aiBtn } from '../state.js';
 import { $, $$, esc, go, toast, confirmDlg } from '../ui.js';
+import { needOf } from '../translate.js';
+import { openTranslate } from '../transui.js';
 
 const TAGS = ['诊所', '日常', '工作', '旅行', '购物', '社交'];
 
@@ -16,7 +18,8 @@ export async function render(root) {
     <div class="field"><label for="tg">标签 / 场景（逗号分隔）</label><input id="tg" value="${esc(d.tags.join('，'))}" placeholder="诊所，接待">
       <div class="chips">${TAGS.map(t => `<button class="chip" data-tag="${t}">${t}</button>`).join('')}</div></div>
     ${(missZh || missEn) ? `<div class="note">${missZh ? `有 ${missZh} 句缺中文翻译` : ''}${missZh && missEn ? '，' : ''}${missEn ? `有 ${missEn} 句缺英文` : ''}。可以手填，也可以用 AI 补齐。</div>
-      <div class="row">${aiBtn('aiFill', '补齐缺失的翻译')}</div>` : ''}
+      <div class="row gap wrap">${aiBtn('aiFill', '补齐缺失的翻译')}${!d.editId && (missZh === d.rows.length || missEn === d.rows.length) ? `<button class="btn primary" id="saveTr">🌐 保存并配上${missZh ? '中文翻译' : '英文译文'}</button>` : ''}</div>
+      ${missEn && !missZh ? '<p class="muted small">这是中文材料：配上英文译文后，英文就是你要学的内容（听读、跟读、测验、复习都用英文）。</p>' : ''}` : ''}
     <div id="rows">${d.rows.map((r, i) => `
       <div class="rowcard" data-i="${i}">
         <div class="rc-h"><span class="idx">${i + 1}</span><input class="spk" data-f="speaker" value="${esc(r.speaker)}" placeholder="说话人（可空）" aria-label="说话人">
@@ -47,9 +50,10 @@ export async function render(root) {
       catch (err) { toast(err.message, 5000); }
       draw();
     });
-    $('#save', root).onclick = save;
+    $('#save', root).onclick = () => save();
+    $('#saveTr', root)?.addEventListener('click', () => save({ translate: true }));
   };
-  const save = async () => {
+  const save = async ({ translate = false } = {}) => {
     sync();
     const rows = d.rows.map(r => ({ ...r, en: r.en.trim(), zh: r.zh.trim() })).filter(r => r.en || r.zh);
     if (!rows.length) return toast('至少要有一句');
@@ -58,10 +62,16 @@ export async function render(root) {
     const old = new Map((keep?.sentences || []).map(s => [s.id, s]));
     const m = keep || { id: db.newId(), source: d.source, sentences: [] };
     m.title = title; m.tags = d.tags;
-    m.sentences = rows.map((r, i) => ({ id: r.id || db.newId(), speaker: r.speaker, en: r.en, zh: r.zh, ...(r.t0 != null ? { t0: r.t0, t1: r.t1 } : {}) }));
+    m.sentences = rows.map((r, i) => {
+      const o = r.id ? old.get(r.id) : null; const base = o ? { ...o } : {};
+      // 保留解析/义项/翻译标记等缓存；改过的文字不再标“机器翻译”，原文改了则缓存的解析作废
+      if (o && (o.en !== r.en || o.zh !== r.zh)) { delete base.tr; if (o.en !== r.en) { delete base.analysis; delete base.notes; } }
+      return { ...base, id: r.id || db.newId(), speaker: r.speaker, en: r.en, zh: r.zh, ...(r.t0 != null ? { t0: r.t0, t1: r.t1 } : {}) };
+    });
     if (d.audioId) m.audioId = d.audioId;
     await db.materials.save(m);
     session.draft = null; toast('已保存'); go('#/lesson/' + m.id);
+    if (translate) setTimeout(() => openTranslate({ ids: [m.id], title: m.title, onDone: () => { if (location.hash.startsWith('#/lesson/' + m.id)) window.dispatchEvent(new HashChangeEvent('hashchange')); } }), 300);
   };
   draw();
 }
