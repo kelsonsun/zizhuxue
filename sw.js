@@ -1,5 +1,5 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '829f49dcc2';
+const VERSION = '394ce2d750';
 const CACHE = 'zizhuxue-' + VERSION;
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

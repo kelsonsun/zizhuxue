@@ -1,5 +1,5 @@
 {
- "version": "829f49dcc2",
+ "version": "394ce2d750",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -15,6 +15,7 @@
   "js/importers.js",
   "js/nlp.js",
   "js/pdfbook.js",
+  "js/practice.js",
   "js/sm2.js",
   "js/speech.js",
   "js/state.js",
@@ -22,6 +23,9 @@
   "js/sync.js",
   "js/textproc.js",
   "js/tools.js",
+  "js/tour.js",
+  "js/translate.js",
+  "js/transui.js",
   "js/tts.js",
   "js/ui.js",
   "js/views/book.js",
