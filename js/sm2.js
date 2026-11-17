@@ -34,6 +34,7 @@ export const isNew = (card) => !card.sch || card.sch.seen === 0;
 
 /** 每日队列：到期的旧卡（最久未复习优先）+ 限量新卡。 */
 export function dailyQueue(cards, { newLimit = 10, ts = Date.now() } = {}) {
+  cards = cards.filter(c => !c.sch?.mastered); // 「熟练」的卡不再出现
   const due = cards.filter(c => !isNew(c) && isDue(c, ts)).sort((a, b) => a.sch.due - b.sch.due);
   const fresh = cards.filter(c => isNew(c)).sort((a, b) => (a.created || 0) - (b.created || 0)).slice(0, newLimit);
   return { due, fresh, all: [...due, ...fresh] };

@@ -17,9 +17,9 @@ export const STEPS = [
   { id: 'word', part: '③ 收藏生词', route: /^#\/lesson\//, target: firstWord, text: '点句子里的任意一个词，看它的音标、多个词义和你原句里的用法。', done: () => vis($('#wsave')) },
   { id: 'star', part: '③ 收藏生词', target: () => $('#wsave'), text: '点「收藏」：这个词会带着你的原句进入复习。', click: true },
   { id: 'review-tab', part: '④ 做一题复习', target: () => $('#tabbar a[data-tab="review"]'), text: '去「复习」。复习就是练习：按遗忘曲线挑内容，由易到难出题。', done: () => H().startsWith('#/review') },
-  { id: 'review-go', part: '④ 做一题复习', route: /^#\/review/, target: () => $('#go'), text: '这是今天的练习顺序（易→难，最难的在最后）。点「开始练习」。', done: () => !!$('.ansmode') },
-  { id: 'answer', part: '④ 做一题复习', route: /^#\/review/, place: 'top', target: () => [$('.ansmode'), $('#ansbox'), $('#show')], text: '每题都可以「说出来」（录音+识别）或「写出来」。答一下；不会就点「不会，看答案」。', done: () => !!$('.rates4') },
-  { id: 'rate', part: '④ 做一题复习', route: /^#\/review/, place: 'top', target: () => [$('.rates4'), $('#next')], text: '看判分，然后点一个评分（或「下一题」）。评分会决定这题下次什么时候再出现。', done: () => !$('.rates4') },
+  { id: 'review-go', part: '④ 做一题复习', route: /^#\/review/, target: () => $('#go'), text: '这是今天的练习顺序（易→难，最难的在最后）。点「开始练习」。', done: () => !!$('.choices') },
+  { id: 'choose', part: '④ 做一题复习', route: /^#\/review/, place: 'top', target: () => [$('.rvcard'), $('.choices')], text: '每题先选一个：「不会」马上看答案，明天再练；「模糊」先给提示再答，答对 9 天后、答错 3 天后再练；「会」直接说/写，答对 12 天后、答错明天再练；「熟练」以后不再出现（点错了 10 秒内可撤销，生词本里也能恢复）。选一个试试。', done: () => +document.documentElement.dataset.rvChose > 0 },
+  { id: 'next', part: '④ 做一题复习', route: /^#\/review/, place: 'top', target: () => $('#next') || $('#ansarea'), text: '作答后看判分、答案和「下次复习」时间，然后点「下一题」。', done: () => +document.documentElement.dataset.rvNext > 0 },
 ];
 let state = null, timer = null, overlay = null, clickBound = null;
 
@@ -70,7 +70,7 @@ function run() {
     const s = STEPS[state.step]; if (!s) return finish();
     if (s.done?.()) return next();
     if (state.step !== lastStep) { lastStep = state.step; scrolled = false;
-      tip.innerHTML = `<div class="tour-part">${esc(s.part)} · 第 ${state.step + 1}/${STEPS.length} 步</div><p>${esc(s.text)}</p><div class="row gap"><button class="mini" id="tourSkip">跳过引导</button><span class="grow"></span>${s.id === 'answer' || s.id === 'rate' ? '' : ''}</div>`;
+      tip.innerHTML = `<div class="tour-part">${esc(s.part)} · 第 ${state.step + 1}/${STEPS.length} 步</div><p>${esc(s.text)}</p><div class="row gap"><button class="mini" id="tourSkip">跳过引导</button><span class="grow"></span></div>`;
       tip.querySelector('#tourSkip').onclick = skip; }
     const routeOk = !s.route || s.route.test(H()); const raw = routeOk ? s.target() : null; const els = (Array.isArray(raw) ? raw : [raw]).filter(vis); const t = els[0];
     if (!vis(t)) { hole.style.display = 'none'; tip.classList.add('float'); tip.style.top = ''; tip.style.left = ''; if (!routeOk) tip.querySelector('p').textContent = s.text + '（请先回到对应页面）'; return; }
