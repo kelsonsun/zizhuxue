@@ -3,6 +3,7 @@
 import * as db from './db.js';
 import { mergeRecord, isDeleted, sameRecord } from './syncmerge.js';
 import { SyncAdapter } from './sync.js';
+import { SYNC_URL } from './deploy.js';
 
 const KEY = 'sync';
 const listeners = new Set();
@@ -14,7 +15,8 @@ let cfg = null; // {url, accountId, email, accessToken, accessExpires, refreshTo
 async function load() { if (!cfg) cfg = await db.meta.get(KEY, null) || {}; return cfg; }
 async function save() { await db.meta.set(KEY, cfg); }
 // 网页版默认用同源服务器（自托管原型同时提供网页和接口）；原生客户端里需填写同步服务器地址
-export const defaultUrl = () => (globalThis.Capacitor?.isNativePlatform?.() || globalThis.__TAURI_INTERNALS__ || /\bElectron\//.test(navigator.userAgent)) ? '' : new URL('api/v1/', document.baseURI).href;
+// 默认同步地址：部署配置里填了正式服务器（js/deploy.js 的 SYNC_URL）就用它；否则网页版用同源服务器（自托管原型同时提供网页和接口），原生客户端留空待填
+export const defaultUrl = () => SYNC_URL || ((globalThis.Capacitor?.isNativePlatform?.() || globalThis.__TAURI_INTERNALS__ || /\bElectron\//.test(navigator.userAgent)) ? '' : new URL('api/v1/', document.baseURI).href);
 export async function getConfig() { await load(); return { ...cfg }; }
 export const isBound = async () => !!(await load()).refreshToken;
 const deviceName = () => { const u = navigator.userAgent; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? '安卓手机' : /Mac/.test(u) ? 'Mac 电脑' : /Windows/.test(u) ? 'Windows 电脑' : '电脑'; };

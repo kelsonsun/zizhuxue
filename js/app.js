@@ -8,6 +8,7 @@ import * as tour from './tour.js';
 import * as cloud from './cloud.js';
 import { mountPill } from './transui.js';
 import { job } from './translate.js';
+import { APP_VERSION } from './version.js';
 const routes = {
   '': () => import('./views/home.js'),
   import: () => import('./views/import.js'),
@@ -64,6 +65,28 @@ document.addEventListener('click', e => {
 }, true);
 
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); session.install = e; window.dispatchEvent(new Event('installready')); });
+window.addEventListener('appinstalled', () => { session.install = null; toast('已安装到主屏幕/桌面，以后点图标就能打开'); });
+
+// 更新完成后告诉用户：已是新版本（版本号来自 package.json，经 tools/build.js 写入 version.js）
+function announceVersion() {
+  try {
+    const prev = localStorage.getItem('zzx.appVersion'); localStorage.setItem('zzx.appVersion', APP_VERSION);
+    if (prev && prev !== APP_VERSION) setTimeout(() => toast(`已更新到 v${APP_VERSION}，你的材料和进度都在`, 5000), 600);
+  } catch { }
+}
+
+// 返回键（安卓客户端由原生层调用；返回 true 表示网页已处理，false 表示可以退出应用）：
+// 先关弹层/引导 → 再回上一页 → 在首页时“再按一次退出”。
+let backArmed = 0;
+window.__zzxBack = () => {
+  const sheets = document.querySelectorAll('.backdrop');
+  if (sheets.length) { const top = sheets[sheets.length - 1]; (top.querySelector('[data-close]') || top).click(); if (document.body.contains(top)) top.remove(); return true; }
+  const tourBtn = document.querySelector('#tSkip, #tourSkip, #tOfferNo, #tDone'); if (tourBtn) { tourBtn.click(); return true; }
+  const h = location.hash.replace(/^#\/?/, '');
+  if (h && h !== '_') { if (history.length > 1) history.back(); else location.hash = '#/'; backArmed = 0; return true; }
+  if (Date.now() - backArmed < 2000) return false;
+  backArmed = Date.now(); toast('再按一次返回键退出'); return true;
+};
 
 // 自动更新：新版本的 Service Worker 装好后接管页面（不动 IndexedDB 里的数据）。
 // 没有在做事（录音、翻译、编辑、复习作答、输入）时自动刷新到新版本；否则在顶部提示，用户点一下再刷新。
@@ -76,9 +99,12 @@ function showUpdateBar() {
   document.body.appendChild(b); b.querySelector('#updNow').onclick = () => location.reload();
 }
 function setupUpdates() {
-  const had = !!navigator.serviceWorker.controller; let reloading = false;
+  // 第一次安装时（页面原本没有 SW 控制）不刷新；之后同一页面里再来的新版本照常更新。
+  // （v1.3 修复：以前只看页面打开那一刻有没有 SW，第一次打开后一直不关的页面永远收不到更新）
+  let had = !!navigator.serviceWorker.controller, reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!had || reloading) return; // 第一次安装时不刷新
+    if (!had) { had = true; return; }
+    if (reloading) return;
     const apply = () => { if (busy()) { showUpdateBar(); return; } reloading = true; location.reload(); };
     apply();
   });
@@ -99,6 +125,7 @@ async function boot() {
   if (db.storageMode === 'memory') toast('提示：此浏览器禁用了本地存储，关闭页面后数据会丢失', 6000);
   await render();
   document.documentElement.dataset.ready = '1';
+  announceVersion();
   tour.boot().catch(e => console.warn('tour', e));
   watchKeyboard(); warmOfflineParts();
   // 云同步：未绑定时什么都不做；已绑定则后台自动同步，收到别的设备的改动后刷新当前页（正在做事时不打断）
