@@ -1,18 +1,15 @@
 // 整本 PDF 书籍导入：本地 pdf.js 解析（vendor），按目录/章节标题/页数自动切章，分批处理并报告进度；
 // 没有文字层的扫描页自动走本地 Tesseract OCR（较慢）。全程不联网。
-import { ocrImage } from './importers.js';
+import { ocrImage, loadScript } from './importers.js';
 import { splitEnglish, splitChinese, lang } from './textproc.js';
 
 const abs = p => new URL(p, document.baseURI).href;
 let libp = null;
 function loadPdfLib() {
   if (libp) return libp;
-  libp = new Promise((res, rej) => {
-    if (globalThis.pdfjsLib) return res(globalThis.pdfjsLib);
-    const s = document.createElement('script'); s.src = abs('vendor/pdfjs/pdf.min.js');
-    s.onload = () => { globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = abs('vendor/pdfjs/pdf.worker.min.js'); res(globalThis.pdfjsLib); };
-    s.onerror = () => rej(new Error('PDF 组件加载失败（离线且尚未缓存？）')); document.head.appendChild(s);
-  });
+  libp = (globalThis.pdfjsLib ? Promise.resolve() : loadScript('vendor/pdfjs/pdf.min.js'))
+    .then(() => { globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = abs('vendor/pdfjs/pdf.worker.min.js'); return globalThis.pdfjsLib; })
+    .catch(e => { libp = null; throw e; });
   return libp;
 }
 const tick = () => new Promise(r => setTimeout(r, 0));

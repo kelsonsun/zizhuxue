@@ -4,7 +4,7 @@ export async function load() {
   if (nlp) return nlp;
   if (!loading) loading = new Promise((res, rej) => {
     const s = document.createElement('script'); s.src = new URL('vendor/compromise/compromise.min.js', document.baseURI).href;
-    s.onload = () => { nlp = globalThis.nlp; res(nlp); }; s.onerror = () => rej(new Error('词性标注组件加载失败')); document.head.appendChild(s);
+    s.onload = () => { nlp = globalThis.nlp; res(nlp); }; s.onerror = () => { loading = null; s.remove(); rej(new Error('词性标注组件加载失败，请稍后重试')); }; document.head.appendChild(s);
   });
   return loading;
 }
@@ -29,6 +29,10 @@ export async function tag(sentence) {
 /** 词在句中的词性（按第 k 个词）。 */
 export async function posOfToken(sentence, word, k) {
   const t = await tag(sentence);
-  const hit = t.filter(x => x.w.toLowerCase() === word.toLowerCase());
-  return hit[Math.min(hit.length - 1, 0)] || null;
+  const w = String(word || '').toLowerCase();
+  let hit = t.filter(x => x.w.toLowerCase() === w);
+  // 卡片词条常是原形（start），原句里可能是变形（started/starting/starts）
+  if (!hit.length && w.length >= 3) { const stem = w.replace(/e$/, ''); hit = t.filter(x => { const v = x.w.toLowerCase(); return v.startsWith(stem) && v.length - stem.length <= 4; }); }
+  if (!hit.length) return null;
+  return hit[Math.min(hit.length - 1, Math.max(0, k | 0))];
 }

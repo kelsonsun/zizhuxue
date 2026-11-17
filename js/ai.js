@@ -4,11 +4,54 @@ import * as db from './db.js';
 export const NOT_CONFIGURED_MSG = '未配置AI，无法生成';
 export class AIError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
 let cfg = null;
-export async function loadConfig() { cfg = await db.meta.get('ai', null); return cfg; }
+export async function loadConfig() {
+  cfg = await db.meta.get('ai', null);
+  // 旧版本保存的配置也规范一遍（地址缺 /v1、密钥带空格、模型留空等）
+  if (cfg && cfg.apiKey) cfg = { ...cfg, baseUrl: normalizeBase(cfg.baseUrl), apiKey: normalizeKey(cfg.apiKey), model: String(cfg.model || '').trim() || DEFAULT_MODEL };
+  return cfg;
+}
 export function getConfig() { return cfg; }
+export const DEFAULT_BASE = 'https://api.openai.com/v1', DEFAULT_MODEL = 'gpt-4o-mini';
+/** 规范接口地址：补 https://、去掉多余斜杠和误贴的 /chat/completions；只有域名时补 /v1（OpenAI 官方地址必须带 /v1） */
+export function normalizeBase(u) {
+  let s = String(u || '').trim().replace(/[\s\u200b-\u200d\ufeff]+/g, '').replace(/[“”"'‘’]/g, '');
+  if (!s) return DEFAULT_BASE;
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s.replace(/^\/+/, '');
+  s = s.replace(/\/+(chat\/completions|completions|audio\/speech|models)\/*$/i, '').replace(/\/+$/, '');
+  try { const x = new URL(s); x.pathname = x.pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, ''); if (!x.pathname || x.pathname === '/') x.pathname = '/v1'; s = x.origin + x.pathname; } catch { }
+  return s;
+}
+/** 规范密钥：去掉前后空格、换行、零宽字符、引号，以及误贴的 “Bearer ” 前缀 */
+export const normalizeKey = k => String(k || '').normalize('NFKC').replace(/[\s\u00a0\u200b-\u200f\u2028\u2029\u2060\ufeff]+/g, '').replace(/^["'“”‘’「」]+|["'“”‘’「」]+$/g, '').replace(/^Bearer/i, '').replace(/[‐‑‒–—―−]/g, '-');
+/** 密钥里不能出现的字符（HTTP 头只允许可见 ASCII；iPhone 粘贴偶尔夹带全角/中文/省略号）。返回问题描述或 '' */
+export function badKeyChars(k) {
+  const bad = [...String(k || '')].map((c, i) => ({ c, i })).filter(x => !/[\x21-\x7e]/.test(x.c));
+  return bad.length ? bad.slice(0, 3).map(x => `第 ${x.i + 1} 个字符“${x.c}”(U+${x.c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`).join('、') : '';
+}
+const errInfo = e => e ? `${e.name || 'Error'}: ${e.message || e}` : '';
+/**
+ * 带密钥请求 AI 接口：先校验密钥字符；超时可控；网络失败时再做一次“不带密钥的简单请求”探测，
+ * 区分“网络不通”和“服务器能连上但带密钥的请求被拦截（CORS 预检/非法头）”，报错写清楚具体原因。
+ */
+export async function aiFetch(path, body, { timeout = 120000 } = {}) {
+  const c = cfg; const bad = badKeyChars(c.apiKey);
+  if (bad) throw new AIError(`密钥里有不能用的字符：${bad}。请删掉密钥重新粘贴（只应包含英文字母、数字和 - _ 等符号）。`, 'KEY_CHARS');
+  const url = c.baseUrl + path; const ac = new AbortController(); const to = setTimeout(() => ac.abort(), timeout);
+  try { return await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.apiKey }, body: JSON.stringify(body), signal: ac.signal }); }
+  catch (e) {
+    if (e?.name === 'AbortError') throw new AIError(`AI 服务 ${Math.round(timeout / 1000)} 秒没有响应（超时），请稍后重试或换个更快的模型。`, 'TIMEOUT');
+    if (/header|ISO-8859|code point|invalid value/i.test(e?.message || '')) throw new AIError(`密钥格式不对，浏览器拒绝发送（${errInfo(e)}）。请删掉密钥重新粘贴。`, 'KEY_CHARS');
+    if (globalThis.navigator && navigator.onLine === false) throw new AIError('设备现在离线，请联网后再试。', 'OFFLINE');
+    let probe = null; const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 10000);
+    try { await fetch(c.baseUrl + '/models', { mode: 'no-cors', signal: ac2.signal }); probe = 'ok'; } catch { probe = null; } finally { clearTimeout(t2); }
+    let host = c.baseUrl; try { host = new URL(c.baseUrl).host; } catch { }
+    if (probe == null) throw new AIError(`网络连不上 ${host}：可能是网络/代理/VPN、广告或内容拦截器、iCloud 私有中继，或所在网络无法访问该服务。请换个网络（如关掉 VPN、Wi-Fi 与蜂窝网络互换）再点「测试连接」。（浏览器错误：${errInfo(e)}）`, 'NETWORK');
+    throw new AIError(`能连上 ${host}（不带密钥的探测请求能到达服务器），但带密钥的请求被浏览器拦截了（CORS 预检失败）。常见原因：接口地址不是 OpenAI 兼容地址，或该服务不允许网页直接调用，或被内容拦截器改写。（浏览器错误：${errInfo(e)}）`, 'CORS');
+  } finally { clearTimeout(to); }
+}
 export function isConfigured() { return !!(cfg && cfg.baseUrl && cfg.apiKey && cfg.model); }
 export async function saveConfig(c) {
-  cfg = { baseUrl: (c.baseUrl || '').trim().replace(/\/+$/, ''), apiKey: (c.apiKey || '').trim(), model: (c.model || '').trim() };
+  cfg = { ...(cfg || {}), ...c, baseUrl: normalizeBase(c.baseUrl), apiKey: normalizeKey(c.apiKey), model: String(c.model || '').trim() || DEFAULT_MODEL };
   await db.meta.set('ai', cfg);
 }
 export async function clearConfig() { cfg = null; await db.meta.set('ai', null); }
@@ -21,22 +64,24 @@ function extractJSON(text) {
   throw new AIError('AI 返回的内容不是有效的 JSON，请重试', 'BAD_FORMAT');
 }
 
-async function chat(messages, { json = true, temperature = 0.4 } = {}) {
+/** 把 HTTP 错误翻成具体原因 */
+export function explainError(status, j) {
+  const e = j?.error || {}; const m = String(e.message || (typeof j?.error === 'string' ? j.error : '') || j?.message || ''); const code = String(e.code || e.type || '');
+  if (status === 401) return new AIError('密钥无效（401）：请检查密钥是否完整、有没有多复制空格，或密钥已被删除。' + (m ? ' 服务返回：' + m : ''), 'AUTH');
+  if (status === 403) return new AIError('没有权限（403）：密钥无权使用这个模型/接口，或所在地区不被支持。' + (m ? ' 服务返回：' + m : ''), 'AUTH');
+  if (status === 429 && /insufficient_quota|quota|billing|balance|余额/i.test(code + ' ' + m)) return new AIError('余额不足（429 insufficient_quota）：这个账号没有可用额度，请到服务商后台充值或检查账单。', 'QUOTA');
+  if (status === 429) return new AIError('请求太频繁（429）：稍等一会儿再试。' + (m ? ' 服务返回：' + m : ''), 'RATE');
+  if (status === 404) return new AIError(/model/i.test(code + m) ? `模型不存在（404）：“${cfg?.model}”在这个接口上不可用，请换一个模型名。` + (m ? ' 服务返回：' + m : '') : `接口地址不对（404）：${cfg?.baseUrl}/chat/completions 不存在，请检查地址（一般以 /v1 结尾）。` + (m ? ' 服务返回：' + m : ''), 'NOT_FOUND');
+  return new AIError(`AI 服务出错（${status}）${m ? '：' + m : ''}`, 'HTTP');
+}
+async function chat(messages, { json = true, temperature = 0.4, timeout = 120000 } = {}) {
   if (!isConfigured()) throw new AIError(NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
-  const url = cfg.baseUrl + '/chat/completions';
-  const body = { model: cfg.model, messages, temperature };
-  const call = async (withFmt) => {
-    const b = withFmt && json ? { ...body, response_format: { type: 'json_object' } } : body;
-    let r;
-    try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey }, body: JSON.stringify(b) }); }
-    catch { throw new AIError('连不上 AI 服务：请检查接口地址和网络；若地址正确，可能是该服务不允许浏览器直接访问（CORS）。', 'NETWORK'); }
-    return r;
-  };
-  let r = await call(true);
-  if ((r.status === 400 || r.status === 422) && json) r = await call(false);
-  if (r.status === 401 || r.status === 403) throw new AIError('AI 服务拒绝了密钥（' + r.status + '），请检查密钥是否正确', 'AUTH');
-  if (!r.ok) { let m = ''; try { m = (await r.json())?.error?.message || ''; } catch {} throw new AIError(`AI 服务出错（${r.status}）${m ? '：' + m : ''}`, 'HTTP'); }
-  let data; try { data = await r.json(); } catch { throw new AIError('AI 服务返回了无法解析的响应', 'BAD_FORMAT'); }
+  const call = ({ fmt, temp }) => aiFetch('/chat/completions', { model: cfg.model, messages, ...(temp ? { temperature } : {}), ...(fmt && json ? { response_format: { type: 'json_object' } } : {}) }, { timeout });
+  // 有的模型不支持 temperature（如推理模型）或 response_format：遇到 400/422 依次去掉再试
+  let r = await call({ fmt: true, temp: true });
+  for (const opt of [{ fmt: false, temp: true }, { fmt: false, temp: false }]) { if (r.status !== 400 && r.status !== 422) break; r = await call(opt); }
+  if (!r.ok) { let j = null; try { j = await r.json(); } catch { } throw explainError(r.status, j); }
+  let data; try { data = await r.json(); } catch { throw new AIError('AI 服务返回了无法解析的响应（可能地址指向了网页而不是接口）', 'BAD_FORMAT'); }
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new AIError('AI 服务没有返回内容', 'BAD_FORMAT');
   return json ? extractJSON(content) : content;
@@ -46,9 +91,11 @@ const SYS = '你是为中国成年英语学习者服务的英语老师助手。�
 const str = v => (typeof v === 'string' ? v.trim() : '');
 
 export async function testConnection() {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content: '请只返回 JSON：{"ok":true}' }]);
+  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content: '请只返回 JSON：{"ok":true}' }], { timeout: 30000 });
   if (r?.ok !== true) throw new AIError('已连通，但返回内容不符合预期', 'BAD_FORMAT');
-  return true;
+  // 再试一句真实翻译，确认“翻译”功能可用
+  const t = await translateBatch(['Good morning.'], 'en2zh');
+  return { ok: true, sample: t[0], baseUrl: cfg.baseUrl, model: cfg.model };
 }
 
 /** 用中文描述实际情景 → 英文情景对话。 */

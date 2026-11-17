@@ -2,9 +2,10 @@ import * as db from './db.js';
 import * as ai from './ai.js';
 import * as tts from './tts.js';
 import { $, $$, esc, toast, sheet, go } from './ui.js';
-import { loadSettings, seedIfFirstRun, session } from './state.js';
+import { loadSettings, seedIfFirstRun, session, isNativeApp } from './state.js';
 
 import * as tour from './tour.js';
+import * as cloud from './cloud.js';
 import { mountPill } from './transui.js';
 import { job } from './translate.js';
 const routes = {
@@ -24,7 +25,9 @@ export const onLeave = fn => { cleanup = fn; };
 
 // 路由渲染串行化：快速连续跳转时，旧页面较慢的异步渲染不会覆盖新页面
 let chain = Promise.resolve();
-function render() { const seq = ++navSeq; chain = chain.then(() => doRender(seq)).catch(() => { }); return chain; }
+// 换页时关掉上一页留下的弹层（否则会挡住新页面）
+const closeSheets = () => { document.querySelectorAll('.backdrop').forEach(b => b.remove()); document.body.classList.remove('noscroll'); };
+function render() { closeSheets(); const seq = ++navSeq; chain = chain.then(() => doRender(seq)).catch(() => { }); return chain; }
 async function doRender(seq) {
   if (seq !== navSeq) return; // 已有更新的跳转，跳过中间态
   const [path, qs] = location.hash.replace(/^#\/?/, '').split('?');
@@ -90,12 +93,36 @@ async function boot() {
   shell();
   await loadSettings(); await ai.loadConfig(); await seedIfFirstRun();
   window.addEventListener('hashchange', render);
-  if ('serviceWorker' in navigator) setupUpdates();
+  if ('serviceWorker' in navigator && !isNativeApp()) setupUpdates();
   mountPill();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if (db.storageMode === 'memory') toast('提示：此浏览器禁用了本地存储，关闭页面后数据会丢失', 6000);
   await render();
   document.documentElement.dataset.ready = '1';
   tour.boot().catch(e => console.warn('tour', e));
+  watchKeyboard(); warmOfflineParts();
+  // 云同步：未绑定时什么都不做；已绑定则后台自动同步，收到别的设备的改动后刷新当前页（正在做事时不打断）
+  cloud.boot().catch(e => console.warn('sync', e));
+  addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
+}
+// 手机键盘弹出时（文本框获得焦点）隐藏底部导航栏，避免它被顶到键盘上方挡住输入框
+function watchKeyboard() {
+  const isText = el => el?.matches?.('textarea, input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=button]), [contenteditable=true]');
+  document.addEventListener('focusin', e => { if (isText(e.target)) document.body.classList.add('kbd'); });
+  document.addEventListener('focusout', () => setTimeout(() => { if (!isText(document.activeElement)) document.body.classList.remove('kbd'); }, 50));
+}
+// 联网时在后台悄悄缓存 PDF / Word 组件（约 1.8MB），装到主屏后断网也能导入 PDF/Word；
+// 截图识别组件较大（约 11MB），不自动下载，首次使用或在「我的 → 离线使用」里手动缓存。省流量模式下不自动下载。
+function warmOfflineParts() {
+  if (!('serviceWorker' in navigator) || isNativeApp() || navigator.onLine === false || navigator.connection?.saveData) return;
+  const run = async () => {
+    try {
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) await new Promise(r => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 5000); });
+      for (const f of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/mammoth/mammoth.browser.min.js']) { const r = await fetch(f); await r.arrayBuffer(); }
+      document.documentElement.dataset.warm = '1';
+    } catch { }
+  };
+  (window.requestIdleCallback || (f => setTimeout(f, 3000)))(run, { timeout: 8000 });
 }
 boot();

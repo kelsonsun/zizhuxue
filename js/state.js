@@ -9,6 +9,8 @@ export async function loadSettings() { Object.assign(settings, defaults, await d
 export async function saveSettings(p) { Object.assign(settings, p); await db.meta.set('settings', { ...settings }); }
 
 export const session = { draft: null, install: null };
+/** 在原生客户端（Capacitor 手机 App / Tauri 桌面）里运行：网页文件已在安装包内，不需要 Service Worker、不需要“装到主屏” */
+export const isNativeApp = () => !!(globalThis.Capacitor?.isNativePlatform?.() || globalThis.__TAURI_INTERNALS__ || /\bElectron\//.test(globalThis.navigator?.userAgent || ''));
 
 /** AI 按钮：未配置时文字固定为“未配置AI，无法生成”，点击不会发起任何请求。 */
 export function aiBtn(id, label, cls = '') {

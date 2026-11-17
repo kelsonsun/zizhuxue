@@ -69,3 +69,13 @@ export async function randomZh(n, exclude = []) {
   }
   return out;
 }
+/** 随机取常见词里指定词性的义项（选择题干扰项用）：[{pos, zh}] */
+export async function randomSenses(posKeyWanted, n = 20) {
+  const m = await load(); const keys = [...m.keys()]; const out = []; const norm = p => { const s = String(p || '').toLowerCase(); return /^v(t|i)?\.$/.test(s) ? 'v' : /^(a|adj)\.$/.test(s) ? 'a' : /^(ad|adv)\.$/.test(s) ? 'adv' : s.replace(/\.$/, ''); };
+  for (let g = 0; out.length < n && g < 6000; g++) {
+    const e = m.get(keys[Math.floor(Math.random() * keys.length)]);
+    if (!e || e.lemma || e.rank > 8000 || !e.zh) continue;
+    const s = parseSenses(e.zh).find(x => !posKeyWanted || norm(x.pos) === posKeyWanted); if (s) out.push(s);
+  }
+  return out;
+}

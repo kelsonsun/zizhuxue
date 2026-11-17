@@ -1,7 +1,7 @@
 // 新手引导：带高亮指向的分步交互引导，带用户真做一遍：导入一段 → 学一句 → 收藏生词 → 做一题复习 → 装到主屏。
 // 进度存本机（meta.tour），刷新后接着走；随时可跳过；「我的」里可重新观看。
 import * as db from './db.js';
-import { session } from './state.js';
+import { session, isNativeApp } from './state.js';
 import { $, esc } from './ui.js';
 
 const H = () => location.hash || '#/';
@@ -50,7 +50,7 @@ function modal(html, buttons) {
 }
 function welcome() {
   const m = modal(`<div class="big-emoji">👋</div><h3>欢迎使用「自主学」</h3><p>用<b>你自己</b>需要的、喜欢的、真实遇到的内容学英语。</p>
-    <p class="muted">接下来带你<b>真做一遍</b>（约 2 分钟）：<br>① 导入一段 → ② 学一句 → ③ 收藏生词 → ④ 做一题复习 → ⑤ 装到主屏。</p><p class="muted small">随时可以跳过；以后在「我的」里可以重新观看。</p>`,
+    <p class="muted">接下来带你<b>真做一遍</b>（约 2 分钟）：<br>① 导入一段 → ② 学一句 → ③ 收藏生词 → ④ 做一题复习${isNativeApp() ? '' : ' → ⑤ 装到主屏'}。</p><p class="muted small">随时可以跳过；以后在「我的」里可以重新观看。</p>`,
     [['tSkip', '跳过'], ['tStart', '开始引导', 'primary grow']]);
   m.querySelector('#tStart').onclick = () => { m.remove(); start(); };
   m.querySelector('#tSkip').onclick = async () => { m.remove(); await db.meta.set('tour', { status: 'skipped', step: 0 }); };
@@ -88,11 +88,11 @@ function run() {
 async function next() { state.step++; await save(); }
 async function finish() {
   stop(); state = { status: 'done', step: STEPS.length }; await save();
-  const standalone = matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  const standalone = matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true || isNativeApp();
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const how = standalone ? '你已经是从主屏幕打开的，不用再装了。' : ios ? '在 Safari 里点底部的「分享」按钮（方框加向上箭头）→ 往下找「添加到主屏幕」→「添加」。之后像 App 一样从主屏打开，无需登录，离线也能用。'
     : session.install ? '点下面的「安装到桌面/主屏」。' : '在浏览器菜单里选「安装应用」或「添加到主屏幕」。';
-  const m = modal(`<div class="big-emoji">🎉</div><h3>⑤ 装到主屏，每天打开练一练</h3><p>${esc(how)}</p><p class="muted small">你已经走完：导入 → 学一句 → 收藏生词 → 复习一题。想再看一遍：「我的 → 重新观看新手引导」。</p>`,
+  const m = modal(`<div class="big-emoji">🎉</div><h3>${isNativeApp() ? '完成！每天打开练一练' : '⑤ 装到主屏，每天打开练一练'}</h3><p>${esc(how)}</p><p class="muted small">你已经走完：导入 → 学一句 → 收藏生词 → 复习一题。想再看一遍：「我的 → 重新观看新手引导」。</p>`,
     [...(session.install && !standalone ? [['tInstall', '安装到桌面/主屏', 'primary']] : []), ['tDone', '完成', 'primary grow']]);
   m.querySelector('#tInstall')?.addEventListener('click', async () => { session.install.prompt(); await session.install.userChoice; session.install = null; m.querySelector('#tInstall').remove(); });
   m.querySelector('#tDone').onclick = () => { m.remove(); location.hash = '#/'; };

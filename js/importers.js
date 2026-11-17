@@ -1,9 +1,10 @@
 // 文件/图片读取：txt、docx、pdf、OCR。第三方库全部来自本地 vendor/（不依赖外网 CDN），按需加载。
 const abs = p => new URL(p, document.baseURI).href;
 const loaded = {};
-function loadScript(src) {
+/** 按需加载 vendor 脚本；失败不缓存失败结果（恢复网络后再点即可），离线时给出可操作的提示 */
+export function loadScript(src) {
   if (loaded[src]) return loaded[src];
-  loaded[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = abs(src); s.onload = res; s.onerror = () => rej(new Error('组件加载失败：' + src + '（离线且尚未缓存？）')); document.head.appendChild(s); });
+  loaded[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = abs(src); s.onload = res; s.onerror = () => { delete loaded[src]; s.remove(); rej(new Error(navigator.onLine === false ? '现在没联网，而这个组件（' + src.split('/')[1] + '）还没缓存到本机。请联网后再试一次，或联网时在「我的 → 离线使用」点「预缓存识别组件」，之后断网也能用。' : '组件加载失败：' + src + '，请检查网络后重试。')); }; document.head.appendChild(s); });
   return loaded[src];
 }
 export const extOf = n => (n.split('.').pop() || '').toLowerCase();
@@ -55,7 +56,7 @@ export async function ocrImage(file, onProgress = () => {}) {
       workerPath: abs('vendor/tesseract/worker.min.js'),
       corePath: abs('vendor/tesseract/core'),
       langPath: abs('vendor/tesseract/lang'),
-      gzip: true,
+      gzip: !globalThis.Capacitor?.isNativePlatform?.() || globalThis.Capacitor?.getPlatform?.() !== 'android', // 安卓打包会把 assets 里的 .gz 自动解压并去掉后缀
       logger: m => { if (m.status) onProgress(m); },
     });
   }
