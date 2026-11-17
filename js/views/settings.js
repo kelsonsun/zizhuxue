@@ -1,26 +1,28 @@
 import * as db from '../db.js';
 import * as ai from '../ai.js';
-import { LocalOnlyAdapter } from '../sync.js';
+import * as cloud from '../cloud.js';
+import { SYNC_AVAILABLE } from '../deploy.js';
+import { sheet } from '../ui.js';
 import { settings, saveSettings, seedIfFirstRun, sampleMaterial } from '../state.js';
 import { $, esc, toast, confirmDlg, download, go } from '../ui.js';
 import * as tour from '../tour.js';
 import { chromeStatus } from '../translate.js';
 import { isIosStandalone } from './review.js';
 import * as sp from '../speech.js';
+import * as tts from '../tts.js';
 
 const OFFLINE_ASSETS = ['vendor/tesseract/tesseract.min.js', 'vendor/tesseract/worker.min.js', 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js', 'vendor/tesseract/core/tesseract-core-lstm.wasm.js', 'vendor/tesseract/lang/eng.traineddata.gz', 'vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/mammoth/mammoth.browser.min.js'];
 
 export async function render(root) {
   const c = ai.getConfig() || { baseUrl: '', apiKey: '', model: '' };
-  const sync = new LocalOnlyAdapter();
   root.innerHTML = `
   <header class="top"><h1>我的</h1><span class="muted">设置、AI、备份</span></header>
 
   <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${ai.isConfigured() ? '已配置' : '未配置'}</span></h2>
     <p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>
-    <div class="field"><label for="ab">接口地址</label><input id="ab" value="${esc(c.baseUrl)}" placeholder="https://api.openai.com/v1" inputmode="url" autocapitalize="off" autocomplete="off"></div>
+    <div class="field"><label for="ab">接口地址</label><input id="ab" value="${esc(c.baseUrl || ai.DEFAULT_BASE)}" placeholder="https://api.openai.com/v1" inputmode="url" autocapitalize="off" autocomplete="off"></div>
     <div class="field"><label for="ak">密钥（API Key）</label><input id="ak" type="password" value="${esc(c.apiKey)}" placeholder="sk-…" autocomplete="off"></div>
-    <div class="field"><label for="am">模型</label><input id="am" value="${esc(c.model)}" placeholder="例如 gpt-4o-mini" autocapitalize="off" autocomplete="off"></div>
+    <div class="field"><label for="am">模型</label><input id="am" value="${esc(c.model || ai.DEFAULT_MODEL)}" placeholder="例如 gpt-4o-mini" autocapitalize="off" autocomplete="off"></div>
     <div class="row gap wrap"><button class="btn primary" id="asave">保存</button><button class="btn" id="atest">测试连接</button><button class="btn" id="aclear">清除</button></div><div class="muted small" id="amsg" role="status"></div></section>
 
   <section class="card"><h2>学习设置</h2>
@@ -29,6 +31,15 @@ export async function render(root) {
     <p class="muted small" id="asrinfo">语音识别：${!sp.asrSupported() ? '这个浏览器没有。' : isIosStandalone() ? 'iPhone 主屏应用里苹果不提供（即使接口存在也不工作），已自动改为录音回放 + 自评。用 Safari 浏览器打开本站则可用（需开启 Siri，语音交给苹果服务器识别）。' : '可用（由浏览器厂商的服务识别，仅供参考）。'}</p>
     ${isIosStandalone() && sp.asrSupported() ? `<label class="check"><input type="checkbox" id="fasr" ${settings.forceAsr ? 'checked' : ''}> 在主屏应用里也尝试语音识别（若无反应会自动改为自评）</label>` : ''}
     <button class="btn" id="tourAgain">🧭 重新观看新手引导</button></section>
+
+  <section class="card" id="voiceCard"><h2>英语朗读声音</h2>
+    <div class="field"><label for="vacc">口音</label><select id="vacc">${Object.entries(tts.ACCENTS).map(([k, v]) => `<option value="${k}" ${(settings.accent || 'auto') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label>朗读引擎</label>
+      <label class="check"><input type="radio" name="veng" value="system" ${settings.ttsEngine !== 'ai' ? 'checked' : ''}> 系统语音（免费、离线可用）</label>
+      <label class="check ${ai.isConfigured() ? '' : 'off'}"><input type="radio" name="veng" value="ai" ${settings.ttsEngine === 'ai' ? 'checked' : ''} ${ai.isConfigured() ? '' : 'disabled'}> AI 自然语音${ai.isConfigured() ? '（用上面配置的接口 /audio/speech，按你的服务计费；生成过的句子缓存在本机，不重复收费）' : '（需先在上面配置 AI 密钥）'}</label></div>
+    <div id="vsys"></div><div id="vai"></div>
+    <div class="row gap wrap"><button class="btn primary" id="vtry">🔊 试听</button></div><div class="muted small" id="vmsg" role="status"></div>
+    <p class="muted small">iPhone 想要更自然的系统声音：打开「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」，选一个口音，下载带“增强”或“高级”字样的声音（如 Ava、Zoe、Evan），下载完回到这里刷新，在「声音」里选它。</p></section>
 
   <section class="card"><h2>翻译（给纯英文/纯中文材料配对照）</h2>
     <p class="muted small">导入纯英文或纯中文的文件后，可以一键配上翻译。三种真实通道，按需选择：</p>
@@ -43,29 +54,63 @@ export async function render(root) {
     <div class="row gap wrap"><button class="btn" id="sample">恢复示例材料</button><button class="btn danger" id="wipe">清空所有数据</button></div>
     <div class="muted small">存储方式：${db.storageMode === 'indexeddb' ? 'IndexedDB（本地）' : '内存（浏览器禁用了本地存储，关闭即丢失）'}</div></section>
 
-  <section class="card"><h2>云同步 <span class="tag">未启用</span></h2>
-    <p class="muted small">当前：${esc(sync.label)}。第一版不联网、不需要登录。数据层已按“可同步”设计（每条记录带更新时间，删除留墓碑，合并策略已实现并测试），后续只需接入同步服务，做到「一键绑定、长期保持登录」，手机和电脑进度自动一致。现在换设备请用上面的 JSON 备份。</p></section>
+  <section class="card" id="syncCard"><h2>云同步 <span class="tag" id="sytag">…</span></h2><div id="sybody"></div></section>
 
   <section class="card"><h2>离线使用</h2>
-    <p class="muted small">界面和离线词典安装后即可离线使用。截图识别、PDF、Word 的组件约 15MB，点下面按钮提前缓存，之后断网也能用。</p>
+    <p class="muted small">界面、离线词典，以及 PDF / Word 组件（约 1.8MB），联网打开过一次后就会自动缓存，断网也能用。截图识别组件约 11MB，为省流量不自动下载：第一次用截图识别时会下载，或点下面按钮提前缓存。缓存的组件在应用更新后仍保留。</p>
+    <div class="muted small" id="offst">离线状态：检测中…</div>
     <button class="btn" id="pre">预缓存识别组件</button><div class="muted small" id="premsg" role="status"></div></section>
 
   <section class="card"><h2>隐私</h2><ul class="small">
-    <li>内容只存在本机浏览器，没有账号、没有服务器。</li>
+    <li>不绑定云同步时，内容只存在本机浏览器，没有账号、不联网。绑定后，材料、生词卡和复习记录会存到你填的同步服务器（AI 密钥和录音不会上传）。</li>
     <li>只有你点「AI」按钮时，相关句子才会发到你配置的 AI 服务。</li>
     <li>只有你确认使用「MyMemory 公共翻译」时，要翻译的句子才会发给 MyMemory。</li>
     <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></section>
 
-  <section class="card"><h2>关于</h2><p class="muted small">自主学 v1.1（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
+  <section class="card"><h2>关于</h2><p class="muted small">自主学 v1.2（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
   const E = id => $(id, root);
+  renderSync(root);
+  const qs = new URLSearchParams(location.hash.split('?')[1] || ''); // 扫配对二维码打开：#/me?pair=CODE&srv=URL
+  if (qs.get('pair')) { history.replaceState(null, '', '#/me'); bindSheet(root, { pair: qs.get('pair'), url: qs.get('srv') || '' }); }
   const read = () => ({ baseUrl: E('#ab').value, apiKey: E('#ak').value, model: E('#am').value });
   const refresh = () => { E('#aist').textContent = ai.isConfigured() ? '已配置' : '未配置'; E('#aist').classList.toggle('okt', ai.isConfigured()); };
-  E('#asave').onclick = async () => { await ai.saveConfig(read()); refresh(); E('#amsg').textContent = ai.isConfigured() ? '已保存（仅存本机）。' : '三项都要填写才算配置完成。'; };
-  E('#aclear').onclick = async () => { await ai.clearConfig(); E('#ab').value = E('#ak').value = E('#am').value = ''; refresh(); E('#amsg').textContent = '已清除。'; };
+  const saveAi = async () => { const r0 = read(); await ai.saveConfig(r0); const c2 = ai.getConfig(); // 只回填用户没在这期间改过的框，避免覆盖正在输入的内容
+    if (E('#ab').value === r0.baseUrl) E('#ab').value = c2.baseUrl; if (E('#am').value === r0.model) E('#am').value = c2.model; if (E('#ak').value === r0.apiKey) E('#ak').value = c2.apiKey; refresh(); if (E('#vsys')) drawVoice(); };
+  E('#asave').onclick = async () => { await saveAi(); E('#amsg').textContent = ai.isConfigured() ? '已保存（仅存本机）。地址已自动规范为 ' + ai.getConfig().baseUrl + '。建议点「测试连接」确认。' : '请填写密钥（地址和模型可用默认值）。'; };
+  // 填完离开输入框就自动保存（以前只有点「保存」才生效，容易以为填了却没保存）
+  ['#ab', '#ak', '#am'].forEach(id => E(id).addEventListener('change', () => { if (E('#ak').value.trim()) saveAi().then(() => { E('#amsg').textContent = '已自动保存（仅存本机）。'; }); }));
+  E('#aclear').onclick = async () => { await ai.clearConfig(); E('#ak').value = ''; E('#ab').value = ai.DEFAULT_BASE; E('#am').value = ai.DEFAULT_MODEL; refresh(); E('#amsg').textContent = '已清除。'; };
   E('#atest').onclick = async () => {
-    await ai.saveConfig(read()); refresh(); const m = E('#amsg');
-    if (!ai.isConfigured()) { m.textContent = '未配置AI，无法测试：请填写地址、密钥和模型。'; return; }
-    m.textContent = '测试中…'; try { await ai.testConnection(); m.textContent = '✓ 连接成功，AI 可以使用。'; } catch (e) { m.textContent = '✗ ' + e.message; }
+    await saveAi(); const m = E('#amsg');
+    if (!ai.isConfigured()) { m.textContent = '未配置AI，无法测试：请填写密钥。'; return; }
+    m.textContent = '测试中…（会发 2 个很短的请求）'; const b = E('#atest'); b.disabled = true;
+    try { const r = await ai.testConnection(); m.textContent = `✓ 连接成功，AI 可以使用（翻译也可以）。地址 ${r.baseUrl} · 模型 ${r.model} · 试译 “Good morning.” → ${r.sample}`; }
+    catch (e) { m.textContent = '✗ ' + e.message; } finally { b.disabled = false; }
+  };
+  // ---- 英语朗读声音 ----
+  const drawVoice = async () => {
+    const aiR = root.querySelector('input[name=veng][value=ai]'); if (aiR) { aiR.disabled = !ai.isConfigured(); aiR.closest('label').classList.toggle('off', !ai.isConfigured()); }
+    const list = tts.englishVoices(settings.accent || 'auto'); const cur = tts.pickVoice();
+    E('#vsys').innerHTML = settings.ttsEngine === 'ai' && ai.isConfigured() ? '' : `<div class="field"><label for="vname">声音</label><select id="vname"><option value="">自动挑选（推荐：${esc(cur ? cur.name : '系统默认')}）</option>${list.map(v => `<option value="${esc(v.name)}" ${settings.voiceName === v.name ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}${tts.qualityTag(v) ? ' · ' + tts.qualityTag(v) : ''}</option>`).join('')}</select></div>
+      ${list.length ? '' : `<p class="muted small">${tts.supported() ? '这台设备上暂时没有这个口音的英语声音，会用其他英语声音朗读。' : '这个浏览器不支持系统朗读。'}</p>`}`;
+    const ci = await tts.cacheInfo();
+    E('#vai').innerHTML = settings.ttsEngine === 'ai' && ai.isConfigured() ? `<div class="field"><label for="vaiv">AI 声音</label><select id="vaiv">${tts.AI_VOICES.map(v => `<option ${(settings.aiVoice || 'coral') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label for="vaim">语音模型</label><input id="vaim" value="${esc(settings.aiTtsModel || tts.AI_TTS_MODEL)}" autocapitalize="off" autocomplete="off"></div>
+      <p class="muted small">${/^gpt-4o/i.test(settings.aiTtsModel || tts.AI_TTS_MODEL) ? '口音通过语音指令实现（gpt-4o 系列支持）。' : '这个模型不支持指定口音，口音设置只对系统语音生效。'}本机已缓存 ${ci.count} 段（${(ci.bytes / 1048576).toFixed(1)} MB）。AI 语音失败时会提示原因并自动改用系统语音。</p>
+      <button class="btn" id="vclr">清除语音缓存</button>` : '';
+    E('#vname')?.addEventListener('change', e => saveSettings({ voiceName: e.target.value }));
+    E('#vaiv')?.addEventListener('change', e => saveSettings({ aiVoice: e.target.value }));
+    E('#vaim')?.addEventListener('change', e => saveSettings({ aiTtsModel: e.target.value.trim() }).then(drawVoice));
+    E('#vclr')?.addEventListener('click', async () => { await tts.clearCache(); E('#vmsg').textContent = '已清除语音缓存。'; drawVoice(); });
+  };
+  drawVoice(); if (tts.supported()) speechSynthesis.addEventListener?.('voiceschanged', () => { if (E('#vsys')) drawVoice(); });
+  E('#vacc').onchange = async e => { await saveSettings({ accent: e.target.value, voiceName: '' }); drawVoice(); };
+  root.querySelectorAll('input[name=veng]').forEach(r => r.onchange = async () => { await saveSettings({ ttsEngine: r.value }); drawVoice(); });
+  E('#vtry').onclick = async () => {
+    const m = E('#vmsg'); m.textContent = settings.ttsEngine === 'ai' && ai.isConfigured() ? '正在生成 AI 语音…' : '';
+    try { await tts.speak('Hi! This is how your English reading voice sounds. Shall we practice together?', { rate: settings.rate });
+      const v = tts.pickVoice(); if (tts.lastEngine === 'ai') await drawVoice(); m.textContent = tts.lastEngine === 'ai' ? `正在使用 AI 自然语音（${settings.aiVoice || 'coral'} · ${settings.aiTtsModel || tts.AI_TTS_MODEL}）` : `正在使用系统语音：${v ? v.name + '（' + v.lang + '）' : '系统默认'}`; }
+    catch (e) { m.textContent = '✗ ' + e.message; }
   };
   E('#nl').onchange = e => saveSettings({ newLimit: +e.target.value });
   E('#fasr')?.addEventListener('change', e => saveSettings({ forceAsr: e.target.checked }));
@@ -86,10 +131,87 @@ export async function render(root) {
   };
   E('#imp').onchange = doImport('merge'); E('#impr').onchange = doImport('replace');
   E('#sample').onclick = async () => { await db.materials.save(sampleMaterial()); toast('已恢复示例材料'); };
-  E('#wipe').onclick = async () => { if (await confirmDlg('清空所有材料、卡片和进度？（AI 设置保留）此操作不能撤销，建议先导出备份。', { ok: '清空', danger: true })) { await db.wipeAll(); await db.meta.set('seeded', true); toast('已清空'); go('#/'); } };
+  E('#wipe').onclick = async () => { if (await confirmDlg('清空所有材料、卡片和进度？（AI 设置保留）此操作不能撤销，建议先导出备份。', { ok: '清空', danger: true })) { await db.wipeAll(); await cloud.resetCursor(); await db.meta.set('seeded', true); toast((await cloud.isBound()) ? '已清空本机（云端数据不受影响，下次同步会重新下载）' : '已清空'); go('#/'); } };
+  const offStatus = async () => {
+    if (!('caches' in window)) { E('#offst').textContent = '离线状态：此浏览器不支持离线缓存'; return; }
+    const has = async f => !!(await caches.match(new URL(f, document.baseURI).href));
+    const pdf = await has('vendor/pdfjs/pdf.worker.min.js') && await has('vendor/pdfjs/pdf.min.js'), word = await has('vendor/mammoth/mammoth.browser.min.js');
+    const ocr = await has('vendor/tesseract/tesseract.min.js') && await has('vendor/tesseract/lang/eng.traineddata.gz') && await has('vendor/tesseract/worker.min.js');
+    const el = E('#offst'); if (el) el.textContent = `离线状态：界面与词典 ✓ · PDF ${pdf ? '✓' : '未缓存'} · Word ${word ? '✓' : '未缓存'} · 截图识别 ${ocr ? '✓' : '未缓存'}`;
+  };
+  offStatus();
   E('#pre').onclick = async () => {
     const m = E('#premsg'); let n = 0; m.textContent = '下载中…';
-    try { for (const a of OFFLINE_ASSETS) { const r = await fetch(a); if (!r.ok) throw new Error(a); await r.arrayBuffer(); m.textContent = `已缓存 ${++n}/${OFFLINE_ASSETS.length}`; } m.textContent = '✓ 全部缓存完成，可离线使用识别、PDF、Word。'; }
+    try { for (const a of OFFLINE_ASSETS) { const r = await fetch(a); if (!r.ok) throw new Error(a); await r.arrayBuffer(); m.textContent = `已缓存 ${++n}/${OFFLINE_ASSETS.length}`; } m.textContent = '✓ 全部缓存完成，可离线使用识别、PDF、Word。'; offStatus(); }
     catch (e) { m.textContent = '缓存失败：' + e.message; }
   };
+}
+
+// ---------- 云同步（默认不打扰：不绑定就完全本地使用） ----------
+const fmtT = ts => ts ? new Date(ts).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '从未';
+/** 是否有可用的同步服务器：已保存过地址，或这次部署自带同步服务器（js/deploy.js，不发网络请求） */
+const syncAvailable = cfg => !!(cfg.url || settings.syncUrl || (SYNC_AVAILABLE && cloud.defaultUrl()));
+async function renderSync(root) {
+  const body = $('#sybody', root), tag = $('#sytag', root); if (!body) return;
+  const cfg = await cloud.getConfig(); const st = cloud.status; const bound = !!cfg.refreshToken;
+  tag.textContent = bound ? (st.state === 'offline' ? '离线排队中' : st.state === 'error' ? '同步出错' : '已绑定') : st.state === 'expired' ? '需重新绑定' : '未绑定'; tag.classList.toggle('okt', bound && st.state === 'ok');
+  if (!bound && !syncAvailable(cfg)) {
+    // 没有可用的同步服务器（如 GitHub Pages 静态部署、原生客户端未配置）：显示“未开通”，不放会报错的按钮
+    tag.textContent = '未开通'; tag.classList.remove('okt');
+    body.innerHTML = `<p class="muted small">这个版本还没有开通云同步服务，数据只保存在这台设备上，不登录也能一直正常使用。需要换设备时，可以用上面「数据与备份」里的导出，再在新设备上导入。</p>
+      <details class="allsense"><summary>我有自己搭建的同步服务器</summary><p class="muted small">填写你自己的「自主学」同步服务器地址后才能绑定；地址不对会直接提示，不会改动本机数据。</p><button class="btn" id="syOwn">填写服务器地址</button></details>`;
+    $('#syOwn', body).onclick = () => bindSheet(root, { own: true });
+    return;
+  }
+  if (!bound) {
+    body.innerHTML = `<p class="muted small">${st.state === 'expired' ? '<b class="warn">' + esc(st.msg) + '</b><br>' : ''}现在所有数据只在这台设备上，不登录也能一直用。想让手机和电脑的材料、生词卡、复习进度保持一致时，再绑定（只需一次，之后长期保持登录、自动同步）。</p>
+      <button class="btn primary" id="syBind">☁️ 绑定/同步</button>`;
+    $('#syBind', body).onclick = () => bindSheet(root);
+    return;
+  }
+  body.innerHTML = `<p class="small">账号：<b>${esc(cfg.email || '（配对加入）')}</b><br><span class="muted">上次同步：<span id="syLast">${fmtT(st.lastSync || cfg.lastSync)}</span> · 待上传 <span id="syPend">${st.pending || 0}</span> 条</span><br><span class="muted" id="syMsg" role="status">${esc(st.msg || '')}</span></p>
+    <div class="row gap wrap"><button class="btn primary" id="syNow">立即同步</button><button class="btn" id="syPair">📱 添加另一台设备</button><button class="btn" id="syOff">解除绑定</button></div>
+    <p class="muted small">同步服务器：${esc(cfg.url)}。会自动在后台同步（打开时、联网时、改动后）；离线时的改动先存本机，联网后自动补传。</p>`;
+  $('#syNow', body).onclick = async () => { $('#syMsg', body).textContent = '同步中…'; try { const r = await cloud.syncNow(); toast(`已同步（下载 ${r?.pulled || 0} 条，上传 ${r?.pushed || 0} 条）`); } catch (e) { toast(cloud.status.msg || e.message, 4000); } renderSync(root); };
+  $('#syPair', body).onclick = () => pairSheet();
+  $('#syOff', body).onclick = async () => { if (await confirmDlg('解除绑定后，这台设备不再同步；本机的数据都保留，云端数据也保留。确定吗？', { ok: '解除绑定' })) { await cloud.unbind(); toast('已解除绑定'); renderSync(root); } };
+  const off = cloud.onChange(() => { if (!document.body.contains(body)) return off(); const l = $('#syLast', body), p = $('#syPend', body), m = $('#syMsg', body); if (l) l.textContent = fmtT(cloud.status.lastSync); if (p) p.textContent = cloud.status.pending; if (m) m.textContent = cloud.status.msg; });
+}
+export function bindSheet(root, { pair = '', url = '', own = false } = {}) {
+  return cloud.getConfig().then(cfg => {
+    const s = sheet(`<h3>绑定云同步</h3>
+      <p class="muted small">绑定后，这台设备上已有的材料、生词卡、复习记录会合并到账号里；另一台设备绑定同一账号后进度一致。</p>
+      <div class="field"><label for="syUrl">同步服务器地址</label><input id="syUrl" value="${esc(url || cfg.url || settings.syncUrl || (own ? '' : cloud.defaultUrl()))}" placeholder="https://你的服务器/api/v1/" inputmode="url" autocapitalize="off" autocomplete="off"></div>
+      <p class="muted small">原型阶段使用自托管的同步服务器；正式上线用哪家云服务，需由董事长决定后填入。</p>
+      <div class="seg" role="tablist"><a href="javascript:void 0" data-t="mail" class="${pair ? '' : 'on'}">邮箱验证码</a><a href="javascript:void 0" data-t="pair" class="${pair ? 'on' : ''}">配对码 / 扫码</a></div>
+      <div data-p="mail" class="${pair ? 'hidden' : ''}">
+        <div class="field"><label for="syEmail">邮箱</label><input id="syEmail" type="email" autocomplete="email" placeholder="you@example.com"></div>
+        <button class="btn" id="sySend">获取验证码</button>
+        <div class="field"><label for="syCode">6 位验证码</label><input id="syCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div>
+        <p class="muted small">原型阶段验证码不发邮件，而是显示在同步服务器的日志里（正式版需接入邮件服务）。</p>
+        <button class="btn primary" id="syVerify">绑定</button></div>
+      <div data-p="pair" class="${pair ? '' : 'hidden'}">
+        <p class="muted small">在已经绑定的那台设备上：「我的 → 云同步 → 添加另一台设备」，会显示配对码和二维码。用手机相机扫二维码可直接打开本页。</p>
+        <div class="field"><label for="syPairCode">配对码</label><input id="syPairCode" value="${esc(pair)}" autocapitalize="characters" autocomplete="off" placeholder="ABCD-EF23"></div>
+        <button class="btn primary" id="syClaim">加入账号</button></div>
+      <div class="muted small" id="syBMsg" role="status"></div>`);
+    const el = s.el, M = t => { $('#syBMsg', el).textContent = t; }, U = () => $('#syUrl', el).value.trim();
+    el.querySelectorAll('.seg a').forEach(a => a.onclick = () => { el.querySelectorAll('.seg a').forEach(x => x.classList.toggle('on', x === a)); el.querySelectorAll('[data-p]').forEach(p => p.classList.toggle('hidden', p.dataset.p !== a.dataset.t)); });
+    const done = async () => { await saveSettings({ syncUrl: U() }); s.close(); toast('已绑定，以后会自动同步'); if (root?.isConnected) renderSync(root); else if (location.hash.startsWith('#/me')) go('#/me'); };
+    $('#sySend', el).onclick = async () => { M('发送中…'); try { await cloud.emailStart(U(), $('#syEmail', el).value.trim()); M('验证码已发出（原型：见服务器日志），10 分钟内有效。'); $('#syCode', el).focus(); } catch (e) { M('✗ ' + e.message); } };
+    $('#syVerify', el).onclick = async () => { M('绑定中…'); try { await cloud.emailVerify(U(), $('#syEmail', el).value.trim(), $('#syCode', el).value.trim()); await done(); } catch (e) { M('✗ ' + e.message); } };
+    $('#syClaim', el).onclick = async () => { M('加入中…'); try { await cloud.pairClaim(U(), $('#syPairCode', el).value.trim()); await done(); } catch (e) { M('✗ ' + e.message); } };
+    return s;
+  });
+}
+async function pairSheet() {
+  const s = sheet(`<h3>添加另一台设备</h3><div id="pp" class="center">生成中…</div>`);
+  try {
+    const cfg = await cloud.getConfig(); const r = await cloud.pairStart();
+    const link = new URL('./', document.baseURI).href + '#/me?pair=' + encodeURIComponent(r.code) + '&srv=' + encodeURIComponent(cfg.url);
+    const { default: qrcode } = await import(new URL('vendor/qrcode/qrcode.js', document.baseURI).href);
+    const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
+    $('#pp', s.el).innerHTML = `<p>在另一台设备上打开「自主学 → 我的 → 绑定/同步 → 配对码」，输入：</p><div class="paircode" id="pairCode">${esc(r.code)}</div>
+      <p class="muted small">或用那台手机的相机扫下面的二维码：</p><div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })}</div><p class="muted small">10 分钟内有效，只能用一次。</p>`;
+  } catch (e) { $('#pp', s.el).textContent = '✗ ' + e.message; }
 }

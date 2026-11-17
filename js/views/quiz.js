@@ -1,6 +1,6 @@
 import * as db from '../db.js';
 import * as tts from '../tts.js';
-import * as dict from '../dict.js';
+import * as S from '../sense.js';
 import { compareWords } from '../textproc.js';
 import { settings, makeCard } from '../state.js';
 import { paragraphs } from '../structure.js';
@@ -8,7 +8,9 @@ import { $, $$, esc, toast, hilite, go } from '../ui.js';
 
 const MODES = [['zh2en', '看中文写英文', '给中文，你写英文，逐词判分'], ['dict', '听写', '听一句，把听到的写下来，逐词判分'], ['mcq', '词义选择', '看生词在你原句里的样子，选中文意思']];
 const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const shortZh = z => (z || '').replace(/\s*\|\s*/g, '；').slice(0, 26);
+// 释义只在词义边界精简（不截断字、不留尾逗号），完整释义可展开
+const shortZh = z => S.briefAll(z).text;
+const POSZH = { v: '动词', n: '名词', a: '形容词', adv: '副词', prep: '介词', pron: '代词', conj: '连词', num: '数词', int: '感叹词' };
 
 export async function render(root, [scope = 'all'], params) {
   const [mats, cards] = await Promise.all([db.materials.all(), db.cards.all()]);
@@ -41,12 +43,15 @@ export async function render(root, [scope = 'all'], params) {
     else if (mode === 'dict') qs = shuffle(sents).slice(0, 10).map(s => ({ s }));
     else {
       qs = shuffle(cpool).slice(0, 10);
-      const others = cards.map(c => c.zh).filter(Boolean);
       qs = await Promise.all(qs.map(async c => {
-        const dis = shuffle(others.filter(z => z !== c.zh)).slice(0, 3).map(shortZh);
-        if (dis.length < 3) dis.push(...(await dict.randomZh(3 - dis.length, [c.zh, ...dis])).map(shortZh));
-        const opts = shuffle([{ t: shortZh(c.zh), ok: true }, ...[...new Set(dis)].slice(0, 3).map(t => ({ t, ok: false }))]);
-        return { c, opts };
+        // 题目释义：优先取与原句中该词词性一致的义项（如 “When did the pain start?” 里 start 是动词）
+        const sense = await S.contextSense(c);
+        const others = shuffle(cards.filter(x => x.id !== c.id && x.term.toLowerCase() !== c.term.toLowerCase()).map(x => x.zh).filter(Boolean));
+        const dis = await S.distractors(sense, others, 3);
+        // vi./vt. 在选项里统一显示为 v.，避免词性标记本身成为答案线索
+        const optText = x => S.briefText({ ...x, pos: S.posKey(x.pos) === 'v' ? 'v.' : x.pos }, 4);
+        const opts = shuffle([{ t: optText(sense), ok: true }, ...dis.map(d => ({ t: optText(d), ok: false }))]);
+        return { c, opts, sense };
       }));
     }
     let i = 0; const res = [];
@@ -61,7 +66,9 @@ export async function render(root, [scope = 'all'], params) {
         $$('.opt', root).forEach(b => b.onclick = () => {
           const o = q.opts[+b.dataset.k]; $$('.opt', root).forEach((x, k) => { x.disabled = true; { if (q.opts[k].ok) x.classList.add('right'); else if (x === b) x.classList.add('bad'); }; });
           res.push({ q, ok: o.ok, score: o.ok ? 100 : 0 });
-          $('#fb', root).innerHTML = `<div class="fb ${o.ok ? 'good' : 'low'}">${o.ok ? '✓ 答对了' : '✗ 正确答案：' + esc(shortZh(q.c.zh))}</div><button class="btn primary" id="nx">${i + 1 >= qs.length ? '看结果' : '下一题'}</button>`;
+          $('#fb', root).innerHTML = `<div class="fb ${o.ok ? 'good' : 'low'}">${o.ok ? '✓ 答对了' : '✗ 正确答案：<span class="ans">' + esc(S.briefText(q.sense, 6)) + '</span>'}
+            ${q.sense.ctxPos && POSZH[q.sense.ctxPos] ? `<div class="muted small">按原句里的词性（${POSZH[q.sense.ctxPos]}，本地标注，仅供参考）选取的义项</div>` : ''}</div>
+            ${q.sense.all ? `<details class="allsense"><summary>展开全部释义</summary>${S.fullHtml(q.sense.all)}</details>` : ''}<button class="btn primary" id="nx">${i + 1 >= qs.length ? '看结果' : '下一题'}</button>`;
           $('#nx', root).onclick = next;
         });
         return;
@@ -86,7 +93,7 @@ export async function render(root, [scope = 'all'], params) {
       const avg = Math.round(res.reduce((a, r) => a + r.score, 0) / res.length), wrong = res.filter(r => !r.ok);
       if (progKey && pool[0]) db.materials.get(sid).then(mm => { if (!mm) return; mm.progress = mm.progress || { done: {}, last: null, quiz: {} }; mm.progress.quiz = mm.progress.quiz || {}; mm.progress.quiz[progKey] = Math.max(avg, mm.progress.quiz[progKey] ?? 0); db.materials.save(mm); });
       root.innerHTML = `<header class="top"><h1>测验结果</h1></header><section class="rvcard"><div class="score ${avg >= 80 ? 'good' : avg >= 50 ? 'mid' : 'low'}"><b>${avg}</b> 分</div><p>答对 ${res.length - wrong.length} / ${res.length} 题</p></section>
-        ${wrong.length ? `<h2>需要再练的</h2><div class="list">${wrong.map(r => `<div class="item"><b>${esc(r.q.s?.en || r.q.c.term)}</b><span class="muted">${esc(r.q.s?.zh || shortZh(r.q.c.zh))}</span></div>`).join('')}</div>${mode !== 'mcq' ? '<button class="btn primary" id="addw">把答错的句子加入复习</button>' : ''}` : '<p class="muted">全部答对，漂亮！</p>'}
+        ${wrong.length ? `<h2>需要再练的</h2><div class="list">${wrong.map(r => `<div class="item"><b>${esc(r.q.s?.en || r.q.c.term)}</b><span class="muted">${esc(r.q.s?.zh || (r.q.sense ? S.briefText(r.q.sense, 6) : shortZh(r.q.c.zh)))}</span></div>`).join('')}</div>${mode !== 'mcq' ? '<button class="btn primary" id="addw">把答错的句子加入复习</button>' : ''}` : '<p class="muted">全部答对，漂亮！</p>'}
         <div class="row gap"><button class="btn" id="again">再来一轮</button><a class="btn" href="#/">首页</a></div>`;
       $('#again', root).onclick = () => start(mode);
       $('#addw', root)?.addEventListener('click', async (e) => {

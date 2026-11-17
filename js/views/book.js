@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { bookStats, progressOf, isBook } from '../structure.js';
 import { $, $$, esc, go, toast, sheet, confirmDlg } from '../ui.js';
 import { openTranslate, statusHtml } from '../transui.js';
+import { deleteMaterials } from '../matdelete.js';
 
 export async function render(root, [id]) {
   const book = await db.materials.get(id);
@@ -26,7 +27,6 @@ export async function render(root, [id]) {
     $('#bs', sh.el).onclick = async () => { book.title = $('#bn', sh.el).value.trim() || book.title; await db.materials.save(book); sh.close(); render(root, [id]); };
   };
   $('#del', root).onclick = async () => {
-    if (!(await confirmDlg(`删除《${book.title}》全部 ${st.chapters.length} 章，以及由它们收藏的卡片？此操作不能撤销。`, { ok: '删除', danger: true }))) return;
-    for (const c of st.chapters) await db.materials.remove(c.id); await db.materials.remove(book.id); toast('已删除整本书'); go('#/library');
+    if (await deleteMaterials([book.id], { onChange: u => { if (u === 'undo') go('#/book/' + book.id); } })) go('#/library');
   };
 }

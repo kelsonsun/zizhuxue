@@ -1,4 +1,6 @@
 import * as db from '../db.js';
+import * as S from '../sense.js';
+import { deleteMaterials } from '../matdelete.js';
 import * as ai from '../ai.js';
 import * as tts from '../tts.js';
 import * as dict from '../dict.js';
@@ -160,7 +162,7 @@ export async function render(root, [id], params = {}) {
     for (let k = 0; k < toks.length; k++) { const w = toks[k].toLowerCase(); if (seen.has(w) || w.length < 2) continue; seen.add(w); const d = await dict.lookup(w).catch(() => null); items.push({ w: toks[k], k, rank: d?.rank ?? 99999, d }); }
     const hard = items.filter(x => x.rank > 300 || !x.d); const list = hard.length ? hard : items;
     const box = $('#wchips', root); if (!box) return;
-    box.innerHTML = list.map(x => `<button class="chip wchip" data-k="${x.k}">${esc(x.w)}${x.d ? `<small>${esc((x.d.senses[0]?.zh || '').slice(0, 8))}</small>` : ''}</button>`).join('') + `<button class="chip" id="allw">${hard.length ? '显示全部词' : ''}</button>`;
+    box.innerHTML = list.map(x => `<button class="chip wchip" data-k="${x.k}">${esc(x.w)}${x.d ? `<small>${esc(S.brief(x.d.senses.find(y => S.posKey(y.pos) !== 'dom') || x.d.senses[0], 2).text)}</small>` : ''}</button>`).join('') + `<button class="chip" id="allw">${hard.length ? '显示全部词' : ''}</button>`;
     $$('.wchip', box).forEach(b => b.onclick = () => openWordSheet(ctx, s, +b.dataset.k));
     $('#allw', box).onclick = () => { box.innerHTML = items.map(x => `<button class="chip wchip" data-k="${x.k}">${esc(x.w)}</button>`).join(''); $$('.wchip', box).forEach(b => b.onclick = () => openWordSheet(ctx, s, +b.dataset.k)); };
   };
@@ -255,7 +257,8 @@ export async function render(root, [id], params = {}) {
       <div class="field"><label for="itg">标签 / 场景（逗号分隔）</label><input id="itg" value="${esc((m.tags || []).join('，'))}"></div>
       <div class="row gap"><button class="btn danger" id="idel">删除${book ? '这一章' : '这份材料'}</button><button class="btn primary grow" id="isave">保存</button></div>`, { cls: 'small' });
     $('#isave', sh.el).onclick = async () => { m.title = $('#it', sh.el).value.trim() || m.title; m.tags = $('#itg', sh.el).value.split(/[,，、]+/).map(s => s.trim()).filter(Boolean); await db.materials.save(m); sh.close(); draw(); };
-    $('#idel', sh.el).onclick = async () => { sh.close(); if (await confirmDlg(`删除「${m.title}」以及由它收藏的 ${(await cards()).length} 张卡片？此操作不能撤销。`, { ok: '删除', danger: true })) { await db.materials.remove(m.id); if (book) { book.chapters = (book.chapters || []).filter(x => x !== m.id); await db.materials.save(book); } toast('已删除'); go(book ? '#/book/' + book.id : '#/library'); } };
+    $('#idel', sh.el).onclick = async () => { sh.close(); const back = book ? '#/book/' + book.id : '#/library';
+      if (await deleteMaterials([m.id], { onChange: u => { if (u === 'undo') go('#/lesson/' + m.id); } })) go(back); };
   }
 
   await draw();

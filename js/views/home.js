@@ -1,9 +1,9 @@
 import * as db from '../db.js';
 import { dailyQueue, dayNumber } from '../sm2.js';
-import { settings, session } from '../state.js';
+import { settings, session, isNativeApp } from '../state.js';
 import { $, esc, fmtDate, go, toast, sheet } from '../ui.js';
 
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone || isNativeApp();
 
 export async function render(root) {
   const [mats, cards, revs] = await Promise.all([db.materials.all(), db.cards.all(), db.reviews.all()]);

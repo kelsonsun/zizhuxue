@@ -4,6 +4,7 @@ import * as tts from '../tts.js';
 import * as dict from '../dict.js';
 import * as sp from '../speech.js';
 import * as P from '../practice.js';
+import * as S from '../sense.js';
 import { sm2, dayNumber } from '../sm2.js';
 import { settings, saveSettings, CARD_TYPE } from '../state.js';
 import { onLeave } from '../app.js';
@@ -48,12 +49,14 @@ export async function render(root, _a, params = {}) {
   order.forEach((x, i) => { x.tail = i >= tailFrom; });
   // 题型：按熟练度 + 避免连续同型
   let prevT = null; for (const x of order) { x.qt = P.chooseType(x.c, prevT); prevT = x.qt; }
+  // 看中文说英文：词卡只给与原句词性一致的义项，避免“动词用法却给名词义”
+  await Promise.all(order.map(async x => { if (x.qt === 'zh2en' && x.c.type !== 'sentence') x.sense = await S.contextSense(x.c).catch(() => null); }));
 
   const plan = () => {
     root.innerHTML = `<header class="top"><h1>今日复习练习</h1><span class="muted">按遗忘曲线挑出 ${order.length} 项 · 到期 ${sel.dueCount} · 新 ${sel.newCount}</span></header>
       <div class="note small">顺序：先易后难，中间易难交叉，<b>最难的放在最后</b>。难度分 = 词汇难度（词频/句长）40% + 你的历史错误率 25% + 记忆难度 EF 15% + 此刻遗忘概率 20%。每题都可以<b>说</b>或<b>写</b>英文来回答。</div>
       <button class="btn primary big" id="go">开始练习（${order.length} 题）</button>
-      <h2>本轮顺序</h2><ol class="plan">${order.map((x, i) => `<li class="pl ${x.tail ? 'tail' : ''}" data-i="${i}"><span class="pl-t">${esc(x.c.term.length > 42 ? x.c.term.slice(0, 40) + '…' : x.c.term)}</span>
+      <h2>本轮顺序</h2><ol class="plan">${order.map((x, i) => `<li class="pl ${x.tail ? 'tail' : ''}" data-i="${i}"><span class="pl-t">${esc(x.c.term.length > 42 ? x.c.term.slice(0, 41).replace(/\s+\S*$/, '') + '…' : x.c.term)}</span>
         <span class="pl-m"><span class="lvl-${P.level(x.diff)}">${P.level(x.diff)} ${x.diff}</span> · ${P.QTYPES[x.qt]} · ${x.c.sch?.seen ? '遗忘概率 ' + pct(x.fp) : '新'}${x.tail ? ' · 压轴' : ''}</span>
         <i class="dbar"><b style="width:${x.diff}%"></b></i></li>`).join('')}</ol>`;
     $('#go', root).onclick = () => { idx = 0; draw(); };
@@ -65,9 +68,9 @@ export async function render(root, _a, params = {}) {
 
   const prompt = (x) => {
     const c = x.c;
-    if (x.qt === 'listen') return `<div class="rv-q muted">${c.type === 'sentence' ? '听一句，把它说出来或写下来' : '听一听，把这个' + CARD_TYPE[c.type] + '说出来或写下来'}</div><div class="row gap center"><button class="btn primary" id="say">🔊 播放</button><button class="btn" id="slow">🐢 慢速</button></div>`;
+    if (x.qt === 'listen') return `<div class="rv-q muted">${c.type === 'sentence' ? '听一句，把它说出来或写下来' : '听一听，把这个' + (CARD_TYPE[c.type] || '词') + '说出来或写下来'}</div><div class="row gap center"><button class="btn primary" id="say">🔊 播放</button><button class="btn" id="slow">🐢 慢速</button></div>`;
     if (x.qt === 'cloze') return `<div class="rv-q muted">原句填空：空里应该是什么？</div><div class="rv-sent">${mask(c.sentence.en, c.term)}</div>${c.sentence.zh ? `<div class="muted">${esc(c.sentence.zh)}</div>` : ''}<div class="muted small">提示：${esc(c.zh || '')}</div>`;
-    return `<div class="rv-q muted">${c.type === 'sentence' ? '用英文说出/写出这句话' : '这个意思用英文怎么说？'}</div><div class="rv-zh">${esc(c.zh)}</div>${c.type !== 'sentence' && c.sentence?.zh ? `<div class="muted small">语境：${esc(c.sentence.zh)}</div>` : ''}`;
+    return `<div class="rv-q muted">${c.type === 'sentence' ? '用英文说出/写出这句话' : '这个意思用英文怎么说？'}</div>${c.type !== 'sentence' && x.sense ? `<div class="rv-zh">${esc(S.briefText({ pos: x.sense.pos, zh: x.sense.zh }, 99))}</div>${S.parse(c.zh).length > 1 ? `<details class="allsense"><summary>展开全部释义</summary>${S.fullHtml(c.zh)}</details>` : ''}` : `<div class="rv-zh">${esc(c.zh)}</div>`}${c.type !== 'sentence' && c.sentence?.zh ? `<div class="muted small">语境：${esc(c.sentence.zh)}</div>` : ''}`;
   };
   const speakRef = (rate = settings.rate) => tts.speak(st.x.c.term, { rate }).catch(e => toast(e.message));
 
@@ -77,7 +80,7 @@ export async function render(root, _a, params = {}) {
     const a = asrStatus();
     root.innerHTML = `<header class="top"><h1>复习练习</h1><span class="muted">${done}/${total} · 剩 ${queue.length}</span></header>
       <div class="bar"><i style="width:${Math.round(100 * done / total)}%"></i></div>
-      <section class="rvcard" data-cid="${esc(x.c.id)}" data-qt="${x.qt}"><span class="tag">${CARD_TYPE[x.c.type]}${x.c.sch?.seen ? '' : ' · 新'} · ${P.QTYPES[x.qt]} · <span class="lvl-${P.level(x.diff)}">${P.level(x.diff)}</span>${x.tail ? ' · 压轴' : ''}</span>${prompt(x)}</section>
+      <section class="rvcard" data-cid="${esc(x.c.id)}" data-qt="${x.qt}"><span class="tag">${(CARD_TYPE[x.c.type] || '词')}${x.c.sch?.seen ? '' : ' · 新'} · ${P.QTYPES[x.qt]} · <span class="lvl-${P.level(x.diff)}">${P.level(x.diff)}</span>${x.tail ? ' · 压轴' : ''}</span>${prompt(x)}</section>
       <div class="seg ansmode" role="tablist"><a role="tab" data-mode="voice" class="${st.mode === 'voice' ? 'on' : ''}">🎙️ 说出来</a><a role="tab" data-mode="text" class="${st.mode === 'text' ? 'on' : ''}">⌨️ 写出来</a></div>
       <div id="ansbox"></div>
       <div class="row gap"><button class="btn" id="hint">💡 提示</button><button class="btn grow" id="show">不会，看答案</button></div>
@@ -127,7 +130,7 @@ export async function render(root, _a, params = {}) {
       ${ratesHtml(q)}`;
     bindRates(q);
   }
-  const answerHtml = () => { const c = st.x.c; return `<div class="rv-ans"><div class="rv-en">${esc(c.term)} <button class="mini" id="hear">🔊</button></div><div class="muted">${esc(c.zh || '')}</div>${c.sentence?.en && c.type !== 'sentence' ? `<div class="rv-sent small">${esc(c.sentence.en)}</div>` : ''}</div>`; };
+  const answerHtml = () => { const c = st.x.c; return `<div class="rv-ans"><div class="rv-en">${esc(c.term)} <button class="mini" id="hear">🔊</button></div>${c.type !== 'sentence' && S.parse(c.zh).length > 1 ? `<div class="muted senses">${S.fullHtml(c.zh)}</div>` : `<div class="muted">${esc(c.zh || '')}</div>`}${c.sentence?.en && c.type !== 'sentence' ? `<div class="rv-sent small">${esc(c.sentence.en)}</div>` : ''}</div>`; };
   const ratesHtml = (sug) => `<p class="muted small">${sug != null ? `建议评分：<b>${QN[sug]}</b>（可改）。` : '对照答案，给自己评个分：'}评分会写入 SM-2，决定下次什么时候再练。</p>
       <div class="rates4">${RATES.map(([q, t, cls]) => `<button class="btn ${cls} ${sug != null && q === (sug < 3 ? 1 : sug) ? 'sug' : ''}" data-q="${q}"><b>${t}</b><small>${dayLabel(sm2(st.x.c.sch, q).interval)}</small></button>`).join('')}</div>
       ${sug != null ? `<button class="btn primary big" id="next">下一题（按建议：${QN[sug]}）</button>` : ''}`;
