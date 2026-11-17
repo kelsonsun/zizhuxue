@@ -11,7 +11,7 @@ export async function render(root) {
   const days = new Set(revs.map(r => r.day)).size;
   const real = mats.filter(m => !m.sample && !m.bookId);
   mats.sort((a, b) => b.updatedAt - a.updatedAt); const top = mats.filter(m => !m.bookId);
-  const todayDone = revs.filter(r => r.day === dayNumber()).length;
+  const todayDone = revs.filter(r => r.day === dayNumber() && r.mode !== 'undo').length;
   const inApp = inst.isStandalone() ? '' : inst.inAppName();
   root.innerHTML = `
   <header class="top"><h1>自主学</h1><span class="muted">用你自己的真实内容学英语</span></header>

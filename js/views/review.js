@@ -5,14 +5,13 @@ import * as dict from '../dict.js';
 import * as sp from '../speech.js';
 import * as P from '../practice.js';
 import * as S from '../sense.js';
-import { sm2, dayNumber } from '../sm2.js';
+import { dayNumber } from '../sm2.js';
 import { settings, saveSettings, CARD_TYPE } from '../state.js';
 import { onLeave } from '../app.js';
 import { $, $$, esc, toast } from '../ui.js';
 import { tokenize } from '../textproc.js';
+import { undoBar } from '../matdelete.js';
 
-const RATES = [[1, '忘了', 'q1'], [3, '模糊', 'q3'], [4, '记得', 'q4'], [5, '轻松', 'q5']];
-const QN = { 0: '不会', 1: '忘了', 2: '差一点', 3: '模糊', 4: '记得', 5: '轻松' };
 const dayLabel = d => d <= 0 ? '今天' : d === 1 ? '明天' : d + '天后';
 const pct = x => Math.round(x * 100) + '%';
 export const isIosStandalone = () => /iP(hone|ad|od)/.test(navigator.userAgent) && (navigator.standalone === true || matchMedia?.('(display-mode: standalone)').matches);
@@ -29,11 +28,10 @@ async function rankMap(cards) {
   const m = new Map(); await Promise.all([...words].map(async w => { const d = await dict.lookup(w).catch(() => null); m.set(w, d?.rank ?? null); })); return m;
 }
 const mask = (sent, term) => { const i = sent.toLowerCase().indexOf(term.toLowerCase()); return i < 0 ? esc(sent) : esc(sent.slice(0, i)) + '<span class="blank">' + '＿'.repeat(Math.min(8, Math.max(3, term.length))) + '</span>' + esc(sent.slice(i + term.length)); };
-const hintOf = (term, lvl) => term.split(' ').map(w => w.slice(0, lvl) + w.slice(lvl).replace(/[A-Za-z]/g, '·')).join(' ');
 
 export async function render(root, _a, params = {}) {
   const cards = await db.cards.all(); const reviews = await db.reviews.all(); const today = dayNumber();
-  const hist = new Map(); for (const r of reviews) { if (!hist.has(r.cardId)) hist.set(r.cardId, []); hist.get(r.cardId).push(r.q); }
+  const hist = new Map(); for (const r of reviews) { if (r.q == null) continue; /* 熟练/撤销：不是作答 */ if (!hist.has(r.cardId)) hist.set(r.cardId, []); hist.get(r.cardId).push(r.q); }
   const sel = P.selectCards(cards, { newLimit: settings.newLimit, max: settings.dailyMax || 40, extra: params.extra ? 10 : 0, today });
   if (!sel.picked.length) {
     const seen = cards.filter(c => c.sch && c.sch.seen > 0); const nextDue = seen.map(c => c.sch.due).sort((a, b) => a - b)[0];
@@ -54,17 +52,17 @@ export async function render(root, _a, params = {}) {
 
   const plan = () => {
     root.innerHTML = `<header class="top"><h1>今日复习练习</h1><span class="muted">按遗忘曲线挑出 ${order.length} 项 · 到期 ${sel.dueCount} · 新 ${sel.newCount}</span></header>
-      <div class="note small">顺序：先易后难，中间易难交叉，<b>最难的放在最后</b>。难度分 = 词汇难度（词频/句长）40% + 你的历史错误率 25% + 记忆难度 EF 15% + 此刻遗忘概率 20%。每题都可以<b>说</b>或<b>写</b>英文来回答。</div>
+      <div class="note small">顺序：先易后难，中间易难交叉，<b>最难的放在最后</b>。难度分 = 词汇难度（词频/句长）40% + 你的历史错误率 25% + 记忆难度 EF 15% + 此刻遗忘概率 20%。每题先选<b>不会 / 模糊 / 会 / 熟练</b>，再<b>说</b>或<b>写</b>英文来回答。</div>
       <button class="btn primary big" id="go">开始练习（${order.length} 题）</button>
       <h2>本轮顺序</h2><ol class="plan">${order.map((x, i) => `<li class="pl ${x.tail ? 'tail' : ''}" data-i="${i}"><span class="pl-t">${esc(x.c.term.length > 42 ? x.c.term.slice(0, 41).replace(/\s+\S*$/, '') + '…' : x.c.term)}</span>
         <span class="pl-m"><span class="lvl-${P.level(x.diff)}">${P.level(x.diff)} ${x.diff}</span> · ${P.QTYPES[x.qt]} · ${x.c.sch?.seen ? '遗忘概率 ' + pct(x.fp) : '新'}${x.tail ? ' · 压轴' : ''}</span>
         <i class="dbar"><b style="width:${x.diff}%"></b></i></li>`).join('')}</ol>`;
-    $('#go', root).onclick = () => { idx = 0; draw(); };
+    $('#go', root).onclick = () => draw();
   };
 
-  const queue = order.slice(); const total = order.length; let done = 0, again = 0, idx = 0; const firstSeen = new Set(); const scores = [];
-  let tailLeft = total - tailFrom; let st = null, recorder = null, audioUrl = null;
-  onLeave(() => { tts.cancel(); recorder?.stop().catch(() => { }); });
+  const queue = order.slice(); const total = order.length; let done = 0; const scores = []; const tally = { dunno: 0, fuzzy: 0, know: 0, master: 0, ok: 0, bad: 0 };
+  let st = null, recorder = null;
+  onLeave(() => { tts.cancel(); recorder?.stop().catch(() => { }); document.querySelector('#undobar')?.remove(); });
 
   const prompt = (x) => {
     const c = x.c;
@@ -73,36 +71,48 @@ export async function render(root, _a, params = {}) {
     return `<div class="rv-q muted">${c.type === 'sentence' ? '用英文说出/写出这句话' : '这个意思用英文怎么说？'}</div>${c.type !== 'sentence' && x.sense ? `<div class="rv-zh">${esc(S.briefText({ pos: x.sense.pos, zh: x.sense.zh }, 99))}</div>${S.parse(c.zh).length > 1 ? `<details class="allsense"><summary>展开全部释义</summary>${S.fullHtml(c.zh)}</details>` : ''}` : `<div class="rv-zh">${esc(c.zh)}</div>`}${c.type !== 'sentence' && c.sentence?.zh ? `<div class="muted small">语境：${esc(c.sentence.zh)}</div>` : ''}`;
   };
   const speakRef = (rate = settings.rate) => tts.speak(st.x.c.term, { rate }).catch(e => toast(e.message));
+  const bump = k => { const h = document.documentElement; h.dataset[k] = String((+h.dataset[k] || 0) + 1); }; // 给新手引导用：是否已选过/点过下一题
 
   function draw() {
     if (!queue.length) return finish();
-    const x = queue[0]; st = { x, hinted: 0, result: null, mode: settings.answerMode || 'voice', audio: null };
-    const a = asrStatus();
+    const x = queue[0]; st = { x, choice: null, result: null, mode: settings.answerMode || 'voice', audio: null };
     root.innerHTML = `<header class="top"><h1>复习练习</h1><span class="muted">${done}/${total} · 剩 ${queue.length}</span></header>
       <div class="bar"><i style="width:${Math.round(100 * done / total)}%"></i></div>
       <section class="rvcard" data-cid="${esc(x.c.id)}" data-qt="${x.qt}"><span class="tag">${(CARD_TYPE[x.c.type] || '词')}${x.c.sch?.seen ? '' : ' · 新'} · ${P.QTYPES[x.qt]} · <span class="lvl-${P.level(x.diff)}">${P.level(x.diff)}</span>${x.tail ? ' · 压轴' : ''}</span>${prompt(x)}</section>
-      <div class="seg ansmode" role="tablist"><a role="tab" data-mode="voice" class="${st.mode === 'voice' ? 'on' : ''}">🎙️ 说出来</a><a role="tab" data-mode="text" class="${st.mode === 'text' ? 'on' : ''}">⌨️ 写出来</a></div>
-      <div id="ansbox"></div>
-      <div class="row gap"><button class="btn" id="hint">💡 提示</button><button class="btn grow" id="show">不会，看答案</button></div>
-      <div id="fb"></div>`;
+      ${choicesHtml()}
+      <div id="ansarea"></div><div id="fb"></div>`;
     $('#say', root)?.addEventListener('click', () => speakRef());
     $('#slow', root)?.addEventListener('click', () => speakRef(0.6));
     if (x.qt === 'listen') setTimeout(() => { if (st?.x === x) speakRef(); }, 300);
-    $$('[data-mode]', root).forEach(b => b.onclick = () => { st.mode = b.dataset.mode; saveSettings({ answerMode: st.mode }); $$('[data-mode]', root).forEach(y => y.classList.toggle('on', y === b)); ansBox(); });
-    $('#hint', root).onclick = () => { st.hinted = Math.min(st.hinted + 1, 3); $('#hint', root).textContent = '💡 ' + hintOf(x.c.term.length > 60 ? x.c.term.split(' ').slice(0, 6).join(' ') + ' …' : x.c.term, st.hinted); };
-    $('#show', root).onclick = () => reveal({ gaveUp: true });
-    ansBox(a);
+    $$('[data-ch]', root).forEach(b => b.onclick = () => choose(b.dataset.ch));
   }
+  function choose(ch) {
+    if (st.choice) return; st.choice = ch; bump('rvChose');
+    if (ch === 'dunno') return giveUp();
+    if (ch === 'master') return master();
+    $('.choices', root).outerHTML = `<div class="chosen muted small">你选了：<b>${P.CHOICE_ZH[ch]}</b>${ch === 'fuzzy' ? '（对了 9 天后再练，错了 3 天后）' : '（对了 12 天后再练，错了 1 天后）'}</div>`;
+    $('.chnote', root)?.remove();
+    const c = st.x.c, h = P.hintText(c.term);
+    $('#ansarea', root).innerHTML = `${ch === 'fuzzy' ? `<div class="hintbox" id="hintbox">💡 提示：<b class="hintl">${esc(h.letters)}</b>（${h.count} 个词）${st.x.qt !== 'zh2en' && c.zh ? `<div class="muted small">中文：${esc(c.zh)}</div>` : ''}</div>` : ''}
+      <div class="seg ansmode" role="tablist"><a role="tab" data-mode="voice" class="${st.mode === 'voice' ? 'on' : ''}">🎙️ 说出来</a><a role="tab" data-mode="text" class="${st.mode === 'text' ? 'on' : ''}">⌨️ 写出来</a></div><div id="ansbox"></div>`;
+    $$('[data-mode]', root).forEach(b => b.onclick = () => { st.mode = b.dataset.mode; saveSettings({ answerMode: st.mode }); $$('[data-mode]', root).forEach(y => y.classList.toggle('on', y === b)); ansBox(); });
+    ansBox();
+    if (st.mode === 'text') setTimeout(() => $('#ans', root)?.focus(), 50);
+  }
+  const choicesHtml = () => `<div class="choices" role="group" aria-label="先选：你会吗？">${P.CHOICES.map(([k, t]) => `<button class="btn ch ch-${k}" data-ch="${k}">${{ dunno: '🙈', fuzzy: '🤔', know: '🙂', master: '⭐' }[k]} ${t}</button>`).join('')}</div>
+      <p class="muted small chnote">先选再答：<b>不会</b>直接看答案（明天再练）·<b>模糊</b>先给提示再答·<b>会</b>直接答·<b>熟练</b>以后不再出（可撤销）</p>`;
   function ansBox(a = asrStatus()) {
-    const box = $('#ansbox', root); if (st.result) return;
+    const box = $('#ansbox', root); if (!box || st.result) return;
     if (st.mode === 'text') {
-      box.innerHTML = `<textarea id="ans" rows="2" placeholder="在这里写英文……" aria-label="你的答案" autocapitalize="off" spellcheck="false"></textarea><button class="btn primary big" id="sub">提交判分</button>`;
+      box.innerHTML = `<textarea id="ans" rows="2" placeholder="在这里写英文……" aria-label="你的答案" autocapitalize="off" spellcheck="false"></textarea>
+        <div class="row gap ansrow"><button class="btn primary grow" id="sub">提交判分</button></div>`;
       $('#sub', box).onclick = () => { const v = $('#ans', box).value.trim(); if (!v) return toast('先写一点再提交'); grade(v, 'text'); };
+      keepVisible($('#ans', box), $('.ansrow', box));
       return;
     }
     if (!sp.recSupported()) { box.innerHTML = `<div class="note">这个浏览器不能录音，请用「写出来」作答。</div>`; return; }
-    box.innerHTML = `<button class="btn primary big" id="recbtn">🎙️ 按一下开始说</button>
-      <p class="muted small">${a.ok ? `说完再按一次。用浏览器语音识别转成文字后判分（${sp.ASR_LABEL}）。` : `⚠️ 语音识别不可用：${esc(a.why)} 仍可录音 → 回放对照参考答案 → 自己评分。`}
+    box.innerHTML = `<div class="row gap ansrow"><button class="btn primary big grow" id="recbtn">🎙️ 按一下开始说</button></div>
+      <p class="muted small">${a.ok ? `说完再按一次。用浏览器语音识别转成文字后判分（${sp.ASR_LABEL}）。` : `⚠️ 语音识别不可用：${esc(a.why)} 仍可录音 → 回放对照参考答案 → 自己判断对不对。`}
       录音只在本机内存里，不上传、不保存。第一次会请求麦克风权限。</p>`;
     const btn = $('#recbtn', box);
     btn.onclick = async () => {
@@ -112,55 +122,79 @@ export async function render(root, _a, params = {}) {
         return;
       }
       btn.disabled = true; btn.textContent = '正在处理…';
-      const r = await recorder.stop(); recorder = null; audioUrl = r.url; st.audio = r.url;
+      const r = await recorder.stop(); recorder = null; st.audio = r.url;
       if (r.asr && r.transcript) return grade(r.transcript, 'voice');
-      // 识别不可用/没识别出来：保留录音回放 + 自评
+      // 识别不可用/没识别出来：保留录音回放 → 自己判断对不对
       const why = !r.asr ? a.why || '语音识别不可用。' : r.error ? `语音识别出错（${r.error}）。` : '没有识别出文字。';
-      reveal({ selfRate: true, why });
+      selfCheck(why);
     };
   }
+  /** 键盘弹出（视口变矮）时，让作答行留在屏幕里。 */
+  function keepVisible(input, row) {
+    const fit = () => { if (document.activeElement === input && row.isConnected) row.scrollIntoView({ block: 'nearest' }); };
+    input.addEventListener('focus', () => setTimeout(fit, 250));
+    const vv = window.visualViewport; if (vv) { vv.addEventListener('resize', fit); onLeave(() => vv.removeEventListener('resize', fit)); }
+    window.addEventListener('resize', fit); onLeave(() => window.removeEventListener('resize', fit));
+  }
+  const answerHtml = () => { const c = st.x.c; return `<div class="rv-ans"><div class="rv-en">${esc(c.term)} <button class="mini" id="hear" aria-label="听发音">🔊</button></div>${c.type !== 'sentence' && S.parse(c.zh).length > 1 ? `<div class="muted senses">${S.fullHtml(c.zh)}</div>` : `<div class="muted">${esc(c.zh || '')}</div>`}${c.sentence?.en && c.type !== 'sentence' ? `<div class="rv-sent small">${esc(c.sentence.en)}</div>` : ''}</div>`; };
+  const nextHtml = days => `<p class="muted small nextdue">下次复习：<b>${dayLabel(days)}</b></p><button class="btn primary big" id="next">下一题</button>`;
+  function bindNext(x) { $('#hear', root)?.addEventListener('click', () => speakRef()); $('#next', root).onclick = () => advance(x); $('#next', root).focus({ preventScroll: true }); $('#fb', root).scrollIntoView({ block: 'nearest' }); }
+  // 不会：马上给出答案（原句/释义/🔊），1 天后再练；本轮不再出
+  async function giveUp() {
+    const x = st.x; st.result = { score: null, mode: 'gaveup' }; tally.dunno++;
+    $('.choices', root)?.remove(); $('.chnote', root)?.remove();
+    const { days } = await commit(x, 'dunno', false);
+    $('#fb', root).innerHTML = `<div class="fb low dunnofb">🙈 没关系，先看答案，明天再练。</div>${answerHtml()}${nextHtml(days)}`;
+    bindNext(x);
+  }
+  // 熟练：跳过，以后不再出现；10 秒内可撤销，生词本里也能恢复
+  async function master() {
+    const x = st.x, c = x.c, prev = c.sch; tally.master++;
+    await commit(x, 'master', true);
+    undoBar(`「${c.term.length > 24 ? c.term.slice(0, 23) + '…' : c.term}」已标为熟练，以后不再出现`, async () => {
+      c.sch = prev; await db.cards.save(c); await db.reviews.add({ cardId: c.id, q: null, choice: 'restore', ts: Date.now(), day: dayNumber(), mode: 'undo' }); tally.master--;
+      if (root.isConnected && st) { done--; queue.unshift(x); draw(); }
+      toast('已撤销，恢复练习');
+    }, 10000);
+    advance(x);
+  }
   function grade(answer, mode) {
-    const ref = st.x.c.term; const r = P.gradeAnswer(ref, answer); const q = P.scoreToQ(r.score, { hinted: st.hinted > 0 });
-    st.result = { score: r.score, q, mode, answer }; scores.push(r.score);
-    $('#ansbox', root).innerHTML = ''; $('#hint', root).parentElement.remove();
-    $('#fb', root).innerHTML = `${mode === 'voice' ? `<div class="muted small">识别到：“${esc(answer)}”（${sp.ASR_LABEL}）</div>` : ''}
-      <div class="score ${r.score >= 80 ? 'good' : r.score >= 50 ? 'mid' : 'low'}"><b>${r.score}</b> 分${r.near ? '（差一个字母）' : ''}${st.hinted ? '（用了提示）' : ''}</div>
-      <div class="diff">${r.tokens.map(t => `<span class="${t.status}" ${t.heard ? `title="你的：${esc(t.heard)}"` : ''}>${esc(t.w)}</span>`).join(' ')}</div>
-      ${answerHtml()}${st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}
-      ${ratesHtml(q)}`;
-    bindRates(q);
+    const ref = st.x.c.term; const r = P.gradeAnswer(ref, answer); const ok = P.isCorrect(r.score);
+    st.result = { score: r.score, mode, answer }; scores.push(r.score);
+    $('#ansbox', root).innerHTML = ''; $('.ansmode', root)?.remove();
+    finalize(ok, `${mode === 'voice' ? `<div class="muted small">识别到：“${esc(answer)}”（${sp.ASR_LABEL}）</div>` : ''}
+      <div class="score ${r.score >= 80 ? 'good' : r.score >= 50 ? 'mid' : 'low'}"><b>${r.score}</b> 分${r.near ? '（差一个字母）' : ''}</div>
+      <div class="diff">${r.tokens.map(t => `<span class="${t.status}" ${t.heard ? `title="你的：${esc(t.heard)}"` : ''}>${esc(t.w)}</span>`).join(' ')}</div>`);
   }
-  const answerHtml = () => { const c = st.x.c; return `<div class="rv-ans"><div class="rv-en">${esc(c.term)} <button class="mini" id="hear">🔊</button></div>${c.type !== 'sentence' && S.parse(c.zh).length > 1 ? `<div class="muted senses">${S.fullHtml(c.zh)}</div>` : `<div class="muted">${esc(c.zh || '')}</div>`}${c.sentence?.en && c.type !== 'sentence' ? `<div class="rv-sent small">${esc(c.sentence.en)}</div>` : ''}</div>`; };
-  const ratesHtml = (sug) => `<p class="muted small">${sug != null ? `建议评分：<b>${QN[sug]}</b>（可改）。` : '对照答案，给自己评个分：'}评分会写入 SM-2，决定下次什么时候再练。</p>
-      <div class="rates4">${RATES.map(([q, t, cls]) => `<button class="btn ${cls} ${sug != null && q === (sug < 3 ? 1 : sug) ? 'sug' : ''}" data-q="${q}"><b>${t}</b><small>${dayLabel(sm2(st.x.c.sch, q).interval)}</small></button>`).join('')}</div>
-      ${sug != null ? `<button class="btn primary big" id="next">下一题（按建议：${QN[sug]}）</button>` : ''}`;
-  function reveal({ gaveUp = false, selfRate = false, why = '' } = {}) {
-    if (st.result) return;
-    st.result = { score: null, q: gaveUp ? 0 : null, mode: selfRate ? 'voice-self' : 'gaveup' };
-    $('#ansbox', root).innerHTML = ''; $('#hint', root)?.parentElement.remove();
-    $('#fb', root).innerHTML = `${why ? `<div class="note small">⚠️ ${esc(why)} 已保留你的录音：回放并对照下面的答案，自己评分。</div>` : ''}${answerHtml()}
-      ${st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}${ratesHtml(gaveUp ? 0 : null)}`;
-    bindRates(gaveUp ? 0 : null);
-  }
-  function bindRates(sug) {
+  function selfCheck(why) {
+    st.result = { score: null, mode: 'voice-self' }; $('#ansbox', root).innerHTML = ''; $('.ansmode', root)?.remove();
+    $('#fb', root).innerHTML = `<div class="note small">⚠️ ${esc(why)} 已保留你的录音：回放并对照下面的答案，自己判断。</div>${answerHtml()}
+      ${st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}
+      <div class="grid2 selfchk"><button class="btn q5" id="selfOk">✓ 说对了</button><button class="btn q1" id="selfBad">✗ 没说对</button></div>`;
     $('#hear', root)?.addEventListener('click', () => speakRef());
-    $$('[data-q]', root).forEach(b => b.onclick = () => rate(+b.dataset.q));
-    $('#next', root)?.addEventListener('click', () => rate(sug));
+    $('#selfOk', root).onclick = () => finalize(true, '', true); $('#selfBad', root).onclick = () => finalize(false, '', true);
   }
-  async function rate(q) {
-    const x = st.x, c = x.c; const first = !firstSeen.has(c.id);
-    if (first) { // SM-2 只在每张卡当天第一次作答时更新；本轮重来的不重复更新
-      firstSeen.add(c.id); c.sch = sm2(c.sch, q); await db.cards.save(c);
-      await db.reviews.add({ cardId: c.id, q, ts: Date.now(), day: dayNumber(), mode: st.result?.mode || 'self', qtype: x.qt, score: st.result?.score ?? null });
-    }
-    queue.shift(); if (x.tail) tailLeft--;
-    if (q < 3) { again++; queue.splice(P.requeuePos(queue.length, tailLeft), 0, x); if (x.tail) tailLeft++; } else done++;
-    draw();
+  async function finalize(ok, html, self = false) {
+    const x = st.x; ok ? tally.ok++ : tally.bad++; tally[st.choice]++;
+    const { days } = await commit(x, st.choice, ok);
+    $('#fb', root).innerHTML = `${self ? `${answerHtml()}${st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}` : html}
+      <div class="fb ${ok ? 'good' : 'low'} verdict">${ok ? '✓ 答对了' : '✗ 没答对，正确答案在下面'}</div>${!self ? answerHtml() : ''}${!self && st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}${nextHtml(days)}`;
+    $('#hintbox', root)?.remove(); bindNext(x);
+  }
+  async function commit(x, choice, correct) {
+    const c = x.c; const { sch, q, days } = P.scheduleChoice(c.sch, choice, correct); c.sch = sch; await db.cards.save(c);
+    const rec = await db.reviews.add({ cardId: c.id, q, choice, correct: choice === 'master' ? null : !!correct, days, ts: Date.now(), day: dayNumber(), mode: st.result?.mode || choice, qtype: x.qt, score: st.result?.score ?? null });
+    return { days, id: rec.id };
+  }
+  function advance(x) {
+    if (queue[0] !== x) return; // 防止连点
+    queue.shift(); done++; bump('rvNext'); draw();
   }
   function finish() {
     const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
     root.innerHTML = `<header class="top"><h1>复习练习</h1></header><div class="empty"><div class="big-emoji">🎉</div><p><b>今天的复习完成了！</b></p>
-      <p class="muted">练习 ${total} 项${avg != null ? `，作答平均 ${avg} 分` : ''}，其中 ${again} 次需要重来。按 SM-2 间隔，之后会在快要忘记的时候再次出现。</p><a class="btn primary" href="#/">回首页</a></div>`;
+      <p class="muted">练习 ${total} 项${avg != null ? `，作答平均 ${avg} 分` : ''}。不会 ${tally.dunno} · 模糊 ${tally.fuzzy} · 会 ${tally.know} · 熟练 ${tally.master}；答对 ${tally.ok}、答错 ${tally.bad}。</p>
+      <p class="muted small">间隔：不会→1 天；模糊 对→9 天/错→3 天；会 对→12 天/错→1 天；熟练→不再出现（生词本里可恢复）。</p><a class="btn primary" href="#/">回首页</a></div>`;
   }
   if (params.go) { draw(); } else plan();
 }

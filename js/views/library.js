@@ -4,6 +4,7 @@ import { CARD_TYPE, settings, saveSettings } from '../state.js';
 import { deleteMaterials } from '../matdelete.js';
 import { $, $$, esc, fmtDate, toast, sheet, confirmDlg, hilite } from '../ui.js';
 import { isDue, isNew, dayNumber } from '../sm2.js';
+import { isMastered, restorePractice } from '../practice.js';
 import { progressOf } from '../structure.js';
 
 const bookPct = chs => { let d = 0, t = 0; for (const c of chs) { const p = progressOf(c); d += p.done; t += p.total; } return t ? Math.round(100 * d / t) : 0; };
@@ -49,13 +50,13 @@ export async function render(root) {
         return `<div class="mrow ${picked.has(m.id) ? 'picked' : ''}" data-id="${m.id}">${selMode ? `<label class="check mpick"><input type="checkbox" data-pick="${m.id}" ${picked.has(m.id) ? 'checked' : ''} aria-label="选择「${esc(m.title)}」"></label>` : ''}<a class="item grow" href="${book ? '#/book/' + m.id : '#/lesson/' + m.id}"><b>${book ? '📖 ' : ''}${esc(m.title)}</b><span class="muted">${book ? `${chs.length} 章 · ${chs.reduce((a, c) => a + c.sentences.length, 0)} 句 · 已学 ${pct}% · ${m.pages || '?'} 页` : `${parent ? '《' + esc(parent.title) + '》第 ' + m.chapterNo + ' 章 · ' : ''}${m.sentences.length} 句 · 已学 ${pct}%`} · ${fmtDate(m.created)}</span>
         <span class="tags">${(m.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</span></a>${selMode ? `<button class="btn danger mdel1" data-del="${m.id}" aria-label="删除「${esc(m.title)}」">🗑</button>` : sortKey === 'manual' ? `<div class="mctl"><button class="btn mv" data-up="${m.id}" aria-label="上移">↑</button><button class="btn mv" data-down="${m.id}" aria-label="下移">↓</button></div><span class="drag" data-drag role="button" aria-label="拖动排序" tabindex="-1">≡</span>` : ''}</div>`; }).join('') || '<div class="empty"><p>没有符合的材料。</p><a class="btn primary" href="#/import">导入第一份材料</a></div>'}</div>
       ${selMode ? `<div class="selbar"><button class="btn" id="mall">${vis.length && vis.every(m => picked.has(m.id)) ? '全不选' : '全选'}</button><span class="grow muted">已选 ${[...picked].filter(id => byId.has(id)).length} 份</span><button class="btn danger" id="mdel" ${picked.size ? '' : 'disabled'}>删除所选</button></div>` : ''}` : `
-      <div class="chips"><button class="chip ${!ctype ? 'on' : ''}" data-ct="">全部</button>${Object.entries(CARD_TYPE).map(([k, v]) => `<button class="chip ${ctype === k ? 'on' : ''}" data-ct="${k}">${v}</button>`).join('')}</div>
-      <div class="list">${cards.filter(c => (!ctype || c.type === ctype) && (!q || (c.term + c.zh + (c.sentence?.en || '')).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => b.created - a.created).map(c => `
+      <div class="chips"><button class="chip ${!ctype ? 'on' : ''}" data-ct="">全部</button>${Object.entries(CARD_TYPE).map(([k, v]) => `<button class="chip ${ctype === k ? 'on' : ''}" data-ct="${k}">${v}</button>`).join('')}${cards.some(isMastered) ? `<button class="chip ${ctype === 'mastered' ? 'on' : ''}" data-ct="mastered">⭐ 已熟练 ${cards.filter(isMastered).length}</button>` : ''}</div>
+      <div class="list">${cards.filter(c => (!ctype || (ctype === 'mastered' ? isMastered(c) : c.type === ctype)) && (!q || (c.term + c.zh + (c.sentence?.en || '')).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => b.created - a.created).map(c => `
         <div class="item card-item" data-c="${c.id}"><div class="row"><b class="grow">${esc(c.term)}</b><span class="tag">${(CARD_TYPE[c.type] || '词')}</span><button class="mini" data-say aria-label="朗读">🔊</button></div>
           ${c.phonetic ? `<span class="muted">/${esc(c.phonetic)}/</span>` : ''}
           <div class="zhline">${esc(c.zh) || '<span class="warn">（释义为空，点这里补充）</span>'}</div>
           ${c.sentence?.en && c.type !== 'sentence' ? `<div class="muted small">原句：${hilite(c.sentence.en, c.term)}</div>` : ''}
-          <div class="muted small">${isNew(c) ? '新卡' : isDue(c) ? '今天到期' : '下次复习 ' + (c.sch.due - dayNumber()) + ' 天后'}</div></div>`).join('') || '<div class="empty"><p>还没有卡片。在材料里点一个词，或点 ☆ 收藏句子。</p></div>'}</div>`}`;
+          ${isMastered(c) ? `<div class="row gap mrow2"><span class="tag mastered">⭐ 已熟练 · 不再出现</span><button class="btn restore" data-restore="${c.id}">↩︎ 恢复练习</button></div>` : `<div class="muted small">${isNew(c) ? '新卡' : isDue(c) ? '今天到期' : '下次复习 ' + (c.sch.due - dayNumber()) + ' 天后'}</div>`}</div>`).join('') || '<div class="empty"><p>还没有卡片。在材料里点一个词，或点 ☆ 收藏句子。</p></div>'}</div>`}`;
     bind(cards, vis, fullOrder);
   };
   const bind = (cards, vis, fullOrder) => {
@@ -89,6 +90,7 @@ export async function render(root) {
     $$('[data-ct]', root).forEach(b => b.onclick = () => { ctype = b.dataset.ct; draw(); });
     $$('.card-item', root).forEach(el => el.onclick = (e) => {
       const c = cards.find(x => x.id === el.dataset.c);
+      if (e.target.closest('[data-restore]')) { c.sch = restorePractice(c.sch); return db.cards.save(c).then(() => { toast('已恢复练习，今天就会出现在复习里'); draw(); }); }
       if (e.target.closest('[data-say]')) return tts.speak(c.type === 'sentence' ? c.term : c.term).catch(x => toast(x.message));
       const sh = sheet(`<h3>${esc(c.term)}</h3>
         <div class="field"><label for="ez">中文释义</label><textarea id="ez" rows="2">${esc(c.zh)}</textarea></div>
