@@ -1,14 +1,15 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '59caad30ed';
+const VERSION = '75318f5ca7';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
 const isVendor = u => /\/vendor\/(tesseract|pdfjs|mammoth)\//.test(u.pathname);
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
-    const list = await (await fetch('precache.json', { cache: 'no-store' })).json();
+    const res = await fetch('precache.json', { cache: 'no-store' }); const list = await res.clone().json();
     const c = await caches.open(CACHE);
     await c.addAll(list.files.map(f => new Request(f, { cache: 'reload' })));
+    await c.put('precache.json', res); // 离线时「我的 → 关于」也能显示版本号
     self.skipWaiting();
   })());
 });

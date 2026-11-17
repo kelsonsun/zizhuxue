@@ -1,5 +1,5 @@
 {
- "version": "59caad30ed",
+ "version": "75318f5ca7",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -15,6 +15,7 @@
   "js/deploy.js",
   "js/dict.js",
   "js/importers.js",
+  "js/install.js",
   "js/matdelete.js",
   "js/nlp.js",
   "js/pdfbook.js",
@@ -33,6 +34,7 @@
   "js/transui.js",
   "js/tts.js",
   "js/ui.js",
+  "js/version.js",
   "js/views/book.js",
   "js/views/draft.js",
   "js/views/home.js",

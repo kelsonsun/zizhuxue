@@ -1,7 +1,7 @@
 {
   "name": "自主学 · 用自己的内容学英语",
   "short_name": "自主学",
-  "description": "导入你自己的真实对话、字幕、截图，自动生成听读材料、生词卡和每日复习。",
+  "description": "用到什么，学什么：把你自己的真实对话、字幕、截图、文件变成英语教材，自动生成听读材料、生词卡和每日复习。打开即用，无需登录，离线可用。",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "./#/",
@@ -32,6 +32,75 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "开始复习",
+      "short_name": "复习",
+      "url": "./#/review",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "导入材料",
+      "short_name": "导入",
+      "url": "./#/import",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "材料库",
+      "short_name": "材料库",
+      "url": "./#/library",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "shots/narrow-home.jpg",
+      "sizes": "540x1200",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "今日复习与导入入口"
+    },
+    {
+      "src": "shots/narrow-lesson.jpg",
+      "sizes": "540x1200",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "逐句听读、点词查词"
+    },
+    {
+      "src": "shots/narrow-review.jpg",
+      "sizes": "540x1200",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "按遗忘曲线复习，说出来或写出来"
+    },
+    {
+      "src": "shots/wide-home.jpg",
+      "sizes": "1280x800",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "电脑上同样好用"
     }
   ]
 }
