@@ -16,7 +16,7 @@ export function sortMats(list, key, { pct = () => 0, order = [] } = {}) {
   if (key === 'title') return a.sort((x, y) => String(x.title).localeCompare(String(y.title), 'zh-Hans-CN', { numeric: true }));
   if (key === 'progress') return a.sort((x, y) => pct(y) - pct(x) || rec(y) - rec(x));
   if (key === 'manual') { const pos = new Map(order.map((id, i) => [id, i])); return a.sort((x, y) => (pos.has(x.id) ? pos.get(x.id) : -1) - (pos.has(y.id) ? pos.get(y.id) : -1) || (y.created || 0) - (x.created || 0)); }
-  return a.sort((x, y) => rec(y) - rec(x));
+  return a.sort((x, y) => rec(y) - rec(x) || (y.created || 0) - (x.created || 0)); // 同一毫秒保存的：按导入时间，顺序稳定
 }
 /** 把“可见列表的新顺序”写回完整顺序：可见项占用的位置不变，只在这些位置之间重排 */
 export function mergeOrder(full, visibleNew) {

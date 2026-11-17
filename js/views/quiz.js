@@ -61,7 +61,7 @@ export async function render(root, [scope = 'all'], params) {
       const q = qs[i];
       if (mode === 'mcq') {
         root.innerHTML = head() + `<section class="rvcard"><div class="rv-term">${esc(q.c.term)}</div><button class="btn" id="say">🔊 听</button><div class="rv-sent">${hilite(q.c.sentence?.en || '', q.c.term)}</div></section>
-          <div class="opts" role="group" aria-label="选项">${q.opts.map((o, k) => `<button class="btn opt" data-k="${k}">${esc(o.t)}</button>`).join('')}</div><div id="fb"></div>`;
+          <div class="opts" role="group" aria-label="选项">${q.opts.map((o, k) => `<button class="btn opt" data-k="${k}"${o.ok ? ' data-ok' : ''}>${esc(o.t)}</button>`).join('')}</div><div id="fb"></div>`;
         $('#say', root).onclick = () => tts.speak(q.c.term).catch(e => toast(e.message));
         $$('.opt', root).forEach(b => b.onclick = () => {
           const o = q.opts[+b.dataset.k]; $$('.opt', root).forEach((x, k) => { x.disabled = true; { if (q.opts[k].ok) x.classList.add('right'); else if (x === b) x.classList.add('bad'); }; });

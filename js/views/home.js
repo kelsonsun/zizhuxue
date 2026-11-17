@@ -3,7 +3,7 @@ import { dailyQueue, dayNumber } from '../sm2.js';
 import { settings, session, isNativeApp } from '../state.js';
 import { $, esc, fmtDate, go, toast, sheet } from '../ui.js';
 
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone || isNativeApp();
+import * as inst from '../install.js';
 
 export async function render(root) {
   const [mats, cards, revs] = await Promise.all([db.materials.all(), db.cards.all(), db.reviews.all()]);
@@ -12,8 +12,10 @@ export async function render(root) {
   const real = mats.filter(m => !m.sample && !m.bookId);
   mats.sort((a, b) => b.updatedAt - a.updatedAt); const top = mats.filter(m => !m.bookId);
   const todayDone = revs.filter(r => r.day === dayNumber()).length;
+  const inApp = inst.isStandalone() ? '' : inst.inAppName();
   root.innerHTML = `
   <header class="top"><h1>自主学</h1><span class="muted">用你自己的真实内容学英语</span></header>
+  ${inApp ? `<div class="card warnbox" id="inAppTip"><b>⚠️ 请用浏览器打开</b><p>${esc(inst.howText())}</p><button class="btn primary" id="copyLink">复制链接</button></div>` : ''}
   <section class="card hero">
     <div class="hero-n">${q.all.length}</div>
     <div class="hero-t">${q.all.length ? `今日待复习（到期 ${q.due.length} · 新卡 ${q.fresh.length}）` : (cards.length ? '今天的复习已经完成 🎉' : '还没有生词卡，先去学一段材料')}</div>
@@ -33,12 +35,12 @@ export async function render(root) {
   <p class="muted small privacy">🔒 你的内容只保存在这台设备的浏览器里。只有你主动使用 AI 或确认使用公共翻译时，相关句子才会发出去。</p>`;
   const box = $('#installBox', root);
   const draw = () => {
-    if (isStandalone()) { box.innerHTML = ''; return; }
-    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (inst.isStandalone() || inApp) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="card install"><b>📲 加到主屏幕，打开即用</b>
-      <p class="muted">${ios ? '在 Safari 点底部「分享」按钮 → 「添加到主屏幕」。之后像 App 一样直接打开，无需登录，离线也能用。' : '安装后会像 App 一样出现在桌面/主屏幕，无需登录，离线也能用。'}</p>
-      ${session.install ? '<button class="btn primary" id="doInstall">一键安装</button>' : ''}</div>`;
-    $('#doInstall', box)?.addEventListener('click', async () => { session.install.prompt(); await session.install.userChoice; session.install = null; draw(); });
+      <p class="muted" id="installHow">${esc(inst.howText())}</p>
+      ${inst.canPrompt() ? '<button class="btn primary" id="doInstall">一键安装</button>' : ''}</div>`;
+    $('#doInstall', box)?.addEventListener('click', async () => { if (await inst.prompt()) toast('已安装，以后从主屏幕/桌面打开即可'); draw(); });
   };
-  draw(); window.addEventListener('installready', draw, { once: true });
+  $('#copyLink', root)?.addEventListener('click', async () => toast(await inst.copyLink() ? '链接已复制，到浏览器里粘贴打开' : '复制失败：请点右上角「···」选「在浏览器打开」', 4000));
+  draw(); window.addEventListener('installready', draw, { once: true }); window.addEventListener('appinstalled', draw, { once: true });
 }

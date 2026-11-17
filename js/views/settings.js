@@ -6,6 +6,8 @@ import { sheet } from '../ui.js';
 import { settings, saveSettings, seedIfFirstRun, sampleMaterial } from '../state.js';
 import { $, esc, toast, confirmDlg, download, go } from '../ui.js';
 import * as tour from '../tour.js';
+import * as inst from '../install.js';
+import { APP_VERSION } from '../version.js';
 import { chromeStatus } from '../translate.js';
 import { isIosStandalone } from './review.js';
 import * as sp from '../speech.js';
@@ -56,6 +58,11 @@ export async function render(root) {
 
   <section class="card" id="syncCard"><h2>云同步 <span class="tag" id="sytag">…</span></h2><div id="sybody"></div></section>
 
+  ${inst.isNative() ? '' : `<section class="card" id="installCard"><h2>装到主屏 / 电脑桌面</h2>
+    <p class="small instst" id="instHow">${esc(inst.howText())}</p>
+    ${inst.canPrompt() ? '<button class="btn primary" id="doInstall2">一键安装</button>' : ''}
+    ${!inst.isStandalone() && inst.inAppName() ? '<button class="btn" id="copyLink2">复制链接</button>' : ''}</section>`}
+
   <section class="card"><h2>离线使用</h2>
     <p class="muted small">界面、离线词典，以及 PDF / Word 组件（约 1.8MB），联网打开过一次后就会自动缓存，断网也能用。截图识别组件约 11MB，为省流量不自动下载：第一次用截图识别时会下载，或点下面按钮提前缓存。缓存的组件在应用更新后仍保留。</p>
     <div class="muted small" id="offst">离线状态：检测中…</div>
@@ -67,7 +74,7 @@ export async function render(root) {
     <li>只有你确认使用「MyMemory 公共翻译」时，要翻译的句子才会发给 MyMemory。</li>
     <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></section>
 
-  <section class="card"><h2>关于</h2><p class="muted small">自主学 v1.2（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
+  <section class="card"><h2>关于</h2><p class="muted small">自主学 v${APP_VERSION}（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
   const E = id => $(id, root);
   renderSync(root);
   const qs = new URLSearchParams(location.hash.split('?')[1] || ''); // 扫配对二维码打开：#/me?pair=CODE&srv=URL
@@ -115,6 +122,8 @@ export async function render(root) {
   E('#nl').onchange = e => saveSettings({ newLimit: +e.target.value });
   E('#fasr')?.addEventListener('change', e => saveSettings({ forceAsr: e.target.checked }));
   E('#tourAgain').onclick = () => tour.start();
+  E('#doInstall2')?.addEventListener('click', async () => { if (await inst.prompt()) toast('已安装，以后从主屏幕/桌面打开即可'); E('#doInstall2')?.remove(); E('#instHow').textContent = inst.howText(); });
+  E('#copyLink2')?.addEventListener('click', async () => toast(await inst.copyLink() ? '链接已复制，到浏览器里粘贴打开' : '复制失败：请点右上角「···」选「在浏览器打开」', 4000));
   E('#mme').onchange = e => { const v = e.target.value.trim(); if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('邮箱格式不对'); saveSettings({ mmEmail: v }); toast(v ? '已保存：MyMemory 额度约 50000 字符/天' : '已清除，匿名使用'); };
   chromeStatus('en2zh').then(st => { E('#csnow').textContent = { available: '可用（语言包已下载）', downloadable: '可用（首次需下载语言包）', downloading: '可用（语言包下载中）', unavailable: '不可用', none: '不支持' }[st] || st; });
   fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
@@ -198,7 +207,7 @@ export function bindSheet(root, { pair = '', url = '', own = false } = {}) {
     const el = s.el, M = t => { $('#syBMsg', el).textContent = t; }, U = () => $('#syUrl', el).value.trim();
     el.querySelectorAll('.seg a').forEach(a => a.onclick = () => { el.querySelectorAll('.seg a').forEach(x => x.classList.toggle('on', x === a)); el.querySelectorAll('[data-p]').forEach(p => p.classList.toggle('hidden', p.dataset.p !== a.dataset.t)); });
     const done = async () => { await saveSettings({ syncUrl: U() }); s.close(); toast('已绑定，以后会自动同步'); if (root?.isConnected) renderSync(root); else if (location.hash.startsWith('#/me')) go('#/me'); };
-    $('#sySend', el).onclick = async () => { M('发送中…'); try { await cloud.emailStart(U(), $('#syEmail', el).value.trim()); M('验证码已发出（原型：见服务器日志），10 分钟内有效。'); $('#syCode', el).focus(); } catch (e) { M('✗ ' + e.message); } };
+    $('#sySend', el).onclick = async () => { M('发送中…'); try { const r = await cloud.emailStart(U(), $('#syEmail', el).value.trim()); M(r?.delivery === 'server-log' ? '验证码已生成（原型服务器：验证码在服务器日志里，不发邮件），10 分钟内有效。' : `验证码已发到你的邮箱，${Math.round((r?.expiresIn || 600) / 60)} 分钟内有效。没收到请看看垃圾邮件。`); $('#syCode', el).focus(); } catch (e) { M('✗ ' + e.message); } };
     $('#syVerify', el).onclick = async () => { M('绑定中…'); try { await cloud.emailVerify(U(), $('#syEmail', el).value.trim(), $('#syCode', el).value.trim()); await done(); } catch (e) { M('✗ ' + e.message); } };
     $('#syClaim', el).onclick = async () => { M('加入中…'); try { await cloud.pairClaim(U(), $('#syPairCode', el).value.trim()); await done(); } catch (e) { M('✗ ' + e.message); } };
     return s;
