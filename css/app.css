@@ -160,3 +160,13 @@ mark{background:#ffe9a8;border-radius:3px;padding:0 1px}
 /* v1.3：内置浏览器（微信等）提示、安装区 */
 .warnbox{border-color:var(--warn);background:#fff8ec}.warnbox p{margin:6px 0 10px;line-height:1.5}
 .instst{margin:4px 0 8px}
+/* v1.3.1 作答前先选：不会 / 模糊 / 会 / 熟练（四个并排，窄屏也放得下，每个 ≥44px） */
+.choices{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:10px 0 4px}
+.choices .btn.ch{flex-direction:column;gap:0;min-height:56px;padding:6px 2px;font-weight:600;font-size:15px;line-height:1.25;white-space:nowrap}
+.ch-dunno{background:#fdecea;border-color:#d98b80;color:#7a1f12}.ch-fuzzy{background:#fff4dc;border-color:#d9a441;color:#6b4100}
+.ch-know{background:#e3f3ec;border-color:#6fb497;color:#0f4d36}.ch-master{background:#eef0fb;border-color:#9aa3d9;color:#28306b}
+.chnote{margin:2px 0 8px}.chosen{margin:8px 0}.hintbox{background:#fff4dc;border:1px solid #e6c47a;border-radius:12px;padding:10px;margin:8px 0}.hintl{font-family:ui-monospace,Menlo,monospace;letter-spacing:1px;color:#5a3700}
+.opt.elim{opacity:.35;text-decoration:line-through}
+.ansrow{flex-wrap:nowrap}.ansrow .btn.big{width:auto}
+.dunnofb{text-align:left;font-size:14px}.nextdue{margin:6px 0}.selfchk{margin:8px 0}
+.tag.mastered{background:#eef0fb;color:#28306b}
