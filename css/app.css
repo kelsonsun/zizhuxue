@@ -15,7 +15,7 @@ a{color:var(--ac)}
 .btn:active{transform:scale(.98)}.btn[disabled]{opacity:.5;pointer-events:none}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}.btn.danger{color:var(--bad);border-color:#e7b9b3}.btn.big{width:100%;min-height:52px;font-size:18px}
 .btn.tog.on,.chip.on{background:var(--ac2);border-color:var(--ac);color:var(--ac);font-weight:600}
-.btn.ai{border-style:dashed;border-color:#9ac4b8;color:var(--ac)}.btn.ai-off{color:var(--mut);border-color:#cfcfc7;background:#f1efe9}
+.btn.ai{border-style:dashed;border-color:#9ac4b8;color:var(--ac)}.btn.ai.primary:not(.ai-off){color:#fff;border-style:solid;border-color:var(--ac)}.btn.ai-off{color:var(--mut);border-color:#cfcfc7;background:#f1efe9}
 .mini{min-height:34px;padding:2px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;font-size:14px;cursor:pointer}.mini.on{color:#d49a00;border-color:#e8cf8a}
 .row{display:flex;align-items:center}.row.gap{gap:8px;margin:8px 0}.row.wrap{flex-wrap:wrap}.row.center{justify-content:center}.grow{flex:1;min-width:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid2 .btn{width:100%}
@@ -157,3 +157,6 @@ mark{background:#ffe9a8;border-radius:3px;padding:0 1px}
 .undobar{position:fixed;left:12px;right:12px;bottom:calc(var(--tab) + 12px + env(safe-area-inset-bottom));z-index:60;display:flex;align-items:center;gap:8px;background:#22302b;color:#fff;border-radius:14px;padding:8px 8px 8px 14px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .undobar span{flex:1;font-size:14px}.undobar .btn{min-height:44px;background:#fff}.undobar .mini2{min-width:44px;min-height:44px;background:transparent;color:#fff;border:0}
 .delinfo{padding-left:18px;margin:6px 0}.delinfo li{margin:4px 0}
+/* v1.3：内置浏览器（微信等）提示、安装区 */
+.warnbox{border-color:var(--warn);background:#fff8ec}.warnbox p{margin:6px 0 10px;line-height:1.5}
+.instst{margin:4px 0 8px}
