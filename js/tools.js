@@ -121,7 +121,7 @@ export function openPractice(ctx, s, opts = {}) {
   const m = ctx.m; let loopTok = 0, recorder = null;
   const sh = sheet(`
     <div class="pen">${s.en ? wordsHtml(s.en) : ''}</div><div class="pzh">${esc(s.zh)}</div>
-    <div class="row gap wrap"><button class="btn" id="p1">▶ 听</button><button class="btn" id="p2">🐢 慢速</button><button class="btn tog" id="p3">🔂 循环</button></div>
+    <div class="row gap wrap">${ctx.hasOrig?.(s) ? '<button class="btn" id="p0">🎧 原声</button>' : ''}<button class="btn" id="p1">▶ 听</button><button class="btn" id="p2">🐢 慢速</button><button class="btn tog" id="p3">🔂 循环</button></div>
     <h3>跟读</h3>
     <p class="muted small">🎙 第一次点录音，浏览器会请求「麦克风」权限，请点「允许」。录音只保存在本机内存里，不上传；关闭页面即清除。</p>
     <div class="row gap"><button class="btn primary grow" id="rec">🎙 开始跟读</button></div>
@@ -136,6 +136,7 @@ export function openPractice(ctx, s, opts = {}) {
   const E = id => $(id, sh.el);
   sh.el.addEventListener('click', e => { const w = e.target.closest('[data-w]'); if (w) openWordSheet(ctx, s, +w.dataset.k); });
   const saySent = rate => tts.speak(s.en, { rate }).catch(e => toast(e.message));
+  E('#p0')?.addEventListener('click', () => { loopTok++; E('#p3').classList.remove('on'); ctx.playOrig(s).catch(e => toast(e.message)); });
   E('#p1').onclick = () => { loopTok++; E('#p3').classList.remove('on'); saySent(ctx.rate()); };
   E('#p2').onclick = () => { loopTok++; E('#p3').classList.remove('on'); saySent(0.6); };
   E('#p3').onclick = async (e) => {
@@ -144,7 +145,8 @@ export function openPractice(ctx, s, opts = {}) {
     while (my === loopTok) { const r = await tts.speak(s.en, { rate: ctx.rate() }).catch(() => 'err'); if (r === 'err' || r === 'interrupted' || my !== loopTok) break; await new Promise(r => setTimeout(r, 400)); }
   };
   const showRec = (r) => {
-    let h = `<div class="ab"><audio controls src="${r.url}" id="myaudio"></audio><div class="row gap"><button class="btn" id="aOrig">听原句</button><button class="btn" id="aMine">听我的</button><button class="btn" id="aBoth">对比：原句→我的</button></div></div>`;
+    const og = ctx.hasOrig?.(s);
+    let h = `<div class="ab"><audio controls src="${r.url}" id="myaudio"></audio><div class="row gap wrap"><button class="btn" id="aOrig">${og ? '听原声' : '听原句'}</button><button class="btn" id="aMine">听我的</button><button class="btn" id="aBoth">对比：${og ? '原声' : '原句'}→我的</button></div></div>`;
     if (r.asr && r.transcript) {
       const sc = sp.scoreSpeech(s.en, r.transcript);
       h += `<div class="score ${sc.score >= 80 ? 'good' : sc.score >= 50 ? 'mid' : 'low'}"><b>${sc.score}</b> 分</div>
@@ -156,8 +158,9 @@ export function openPractice(ctx, s, opts = {}) {
     h += `<div class="muted small">⚠ ${sp.ASR_LABEL}。识别结果受口音、噪音和浏览器影响，分数只是参考，不代表发音水平。</div>`;
     E('#recres').innerHTML = h;
     const mine = E('#myaudio');
-    E('#aOrig').onclick = () => saySent(ctx.rate()); E('#aMine').onclick = () => { tts.cancel(); mine.currentTime = 0; mine.play(); };
-    E('#aBoth').onclick = async () => { await tts.speak(s.en, { rate: ctx.rate() }).catch(() => { }); mine.currentTime = 0; mine.play(); };
+    const orig = () => og ? ctx.playOrig(s).catch(e => toast(e.message)) : tts.speak(s.en, { rate: ctx.rate() }).catch(e => toast(e.message));
+    E('#aOrig').onclick = () => orig(); E('#aMine').onclick = () => { tts.cancel(); mine.currentTime = 0; mine.play(); };
+    E('#aBoth').onclick = async () => { await orig(); mine.currentTime = 0; mine.play(); };
   };
   if (recs.has(s.id)) showRec(recs.get(s.id));
   E('#rec').onclick = async (e) => {

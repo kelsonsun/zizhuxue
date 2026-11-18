@@ -13,6 +13,7 @@ const routes = {
   '': () => import('./views/home.js'),
   import: () => import('./views/import.js'),
   draft: () => import('./views/draft.js'),
+  asr: () => import('./views/asr.js'),
   library: () => import('./views/library.js'),
   lesson: () => import('./views/lesson.js'),
   book: () => import('./views/book.js'),
@@ -38,7 +39,7 @@ async function doRender(seq) {
   tts.cancel();
   const root = $('#app');
   const loader = routes[name] ?? routes[''];
-  const tab = { '': '', import: 'import', draft: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', review: 'review', me: 'me' }[name] ?? '';
+  const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', review: 'review', me: 'me' }[name] ?? '';
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   root.scrollTop = 0; window.scrollTo(0, 0);
   try {

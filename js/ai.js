@@ -17,7 +17,7 @@ export function normalizeBase(u) {
   let s = String(u || '').trim().replace(/[\s\u200b-\u200d\ufeff]+/g, '').replace(/[“”"'‘’]/g, '');
   if (!s) return DEFAULT_BASE;
   if (!/^https?:\/\//i.test(s)) s = 'https://' + s.replace(/^\/+/, '');
-  s = s.replace(/\/+(chat\/completions|completions|audio\/speech|models)\/*$/i, '').replace(/\/+$/, '');
+  s = s.replace(/\/+(chat\/completions|completions|audio\/speech|audio\/transcriptions|models)\/*$/i, '').replace(/\/+$/, '');
   try { const x = new URL(s); x.pathname = x.pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, ''); if (!x.pathname || x.pathname === '/') x.pathname = '/v1'; s = x.origin + x.pathname; } catch { }
   return s;
 }
