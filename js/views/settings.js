@@ -25,6 +25,7 @@ export async function render(root) {
     <div class="field"><label for="ab">接口地址</label><input id="ab" value="${esc(c.baseUrl || ai.DEFAULT_BASE)}" placeholder="https://api.openai.com/v1" inputmode="url" autocapitalize="off" autocomplete="off"></div>
     <div class="field"><label for="ak">密钥（API Key）</label><input id="ak" type="password" value="${esc(c.apiKey)}" placeholder="sk-…" autocomplete="off"></div>
     <div class="field"><label for="am">模型</label><input id="am" value="${esc(c.model || ai.DEFAULT_MODEL)}" placeholder="例如 gpt-4o-mini" autocapitalize="off" autocomplete="off"></div>
+    <div class="field"><label for="asrm">语音转写模型 <span class="muted small">（录音/视频自动转文字，接口 /audio/transcriptions）</span></label><input id="asrm" value="${esc(c.asrModel || 'whisper-1')}" placeholder="whisper-1 或 gpt-4o-mini-transcribe" autocapitalize="off" autocomplete="off"></div>
     <div class="row gap wrap"><button class="btn primary" id="asave">保存</button><button class="btn" id="atest">测试连接</button><button class="btn" id="aclear">清除</button></div><div class="muted small" id="amsg" role="status"></div></section>
 
   <section class="card"><h2>学习设置</h2>
@@ -79,13 +80,13 @@ export async function render(root) {
   renderSync(root);
   const qs = new URLSearchParams(location.hash.split('?')[1] || ''); // 扫配对二维码打开：#/me?pair=CODE&srv=URL
   if (qs.get('pair')) { history.replaceState(null, '', '#/me'); bindSheet(root, { pair: qs.get('pair'), url: qs.get('srv') || '' }); }
-  const read = () => ({ baseUrl: E('#ab').value, apiKey: E('#ak').value, model: E('#am').value });
+  const read = () => ({ baseUrl: E('#ab').value, apiKey: E('#ak').value, model: E('#am').value, asrModel: E('#asrm').value.trim() || 'whisper-1' });
   const refresh = () => { E('#aist').textContent = ai.isConfigured() ? '已配置' : '未配置'; E('#aist').classList.toggle('okt', ai.isConfigured()); };
   const saveAi = async () => { const r0 = read(); await ai.saveConfig(r0); const c2 = ai.getConfig(); // 只回填用户没在这期间改过的框，避免覆盖正在输入的内容
     if (E('#ab').value === r0.baseUrl) E('#ab').value = c2.baseUrl; if (E('#am').value === r0.model) E('#am').value = c2.model; if (E('#ak').value === r0.apiKey) E('#ak').value = c2.apiKey; refresh(); if (E('#vsys')) drawVoice(); };
   E('#asave').onclick = async () => { await saveAi(); E('#amsg').textContent = ai.isConfigured() ? '已保存（仅存本机）。地址已自动规范为 ' + ai.getConfig().baseUrl + '。建议点「测试连接」确认。' : '请填写密钥（地址和模型可用默认值）。'; };
   // 填完离开输入框就自动保存（以前只有点「保存」才生效，容易以为填了却没保存）
-  ['#ab', '#ak', '#am'].forEach(id => E(id).addEventListener('change', () => { if (E('#ak').value.trim()) saveAi().then(() => { E('#amsg').textContent = '已自动保存（仅存本机）。'; }); }));
+  ['#ab', '#ak', '#am', '#asrm'].forEach(id => E(id).addEventListener('change', () => { if (E('#ak').value.trim()) saveAi().then(() => { E('#amsg').textContent = '已自动保存（仅存本机）。'; }); }));
   E('#aclear').onclick = async () => { await ai.clearConfig(); E('#ak').value = ''; E('#ab').value = ai.DEFAULT_BASE; E('#am').value = ai.DEFAULT_MODEL; refresh(); E('#amsg').textContent = '已清除。'; };
   E('#atest').onclick = async () => {
     await saveAi(); const m = E('#amsg');

@@ -29,11 +29,12 @@ export async function render(root, [id], params = {}) {
   const groups = paragraphs(m); const pi = paraIndexOf(m, si); const grp = groups[pi] || { start: 0, end: N - 1 };
   const range = lv === 'sent' || lv === 'word' ? [si, si] : lv === 'para' ? [grp.start, grp.end] : [0, N - 1];
   const st = { rate: settings.rate, loopOne: false, loopAll: false, showZh: settings.showZh, orig: false, tok: 0, cur: -1 };
-  const ctx = { m, rate: () => st.rate, refresh: () => draw() };
+  const ctx = { m, rate: () => st.rate, refresh: () => draw(), hasOrig: s => hasOrig(s), playOrig: (s, rate) => { st.tok++; tts.cancel(); return playOrig(s, rate ?? st.rate); } };
   const cards = () => db.cards.all().then(a => a.filter(c => c.materialId === m.id));
   let au = null;
   onLeave(() => { st.tok++; tts.cancel(); if (au) au.pause(); if (audioUrl) URL.revokeObjectURL(audioUrl); });
   const hasSeg = () => audioUrl && m.sentences.some(s => s.t0 != null);
+  const hasOrig = s => !!(audioUrl && s && s.t0 != null);
   const url = (l, i) => `#/lesson/${m.id}?lv=${l}&si=${i}`;
   if (N && (m.progress?.last?.lv !== lv || m.progress?.last?.si !== si)) touchLast(m, { lv, si });
 
@@ -47,7 +48,7 @@ export async function render(root, [id], params = {}) {
         <button class="pbtn" data-play aria-label="播放第${i + 1}句">▶</button>
         <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}<div class="en">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文，请编辑补上）</span>'}</div>
           <div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div>${s.tr ? `<div class="trtag">${s.orig === 'zh' ? '中文原文 · 英文为' : ''}${esc(SHORT[s.tr] || '机器翻译')}，可编辑</div>` : ''}</div>
-        <div class="sact"><button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button><button class="mini" data-practice>练习</button></div>
+        <div class="sact">${hasOrig(s) ? '<button class="mini orig" data-orig aria-label="播放原声">🎧 原声</button>' : ''}<button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button><button class="mini" data-practice>练习</button></div>
       </div>`;
   const loopLabel = lv === 'chapter' ? '🔁 整篇循环' : lv === 'para' ? '🔁 循环本段' : '🔁 循环';
   const playLabel = lv === 'chapter' ? '▶ 整篇朗读' : lv === 'para' ? '▶ 朗读本段' : '▶ 听这句';
@@ -86,6 +87,7 @@ export async function render(root, [id], params = {}) {
       body = playerHtml() + `<div class="bigsent" id="sents"><div class="sent solo ${done ? 'done' : ''}" data-i="${si}">
           <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}<div class="en big">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文）</span>'}</div><div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div></div>
           <div class="sact"><button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button></div></div></div>
+        ${hasOrig(s) ? `<div class="row gap"><button class="btn grow" id="origSent">🎧 听原声（录音里这一句）</button></div>` : ''}
         <div class="grid2"><button class="btn primary" id="pract">🎙 跟读与练习</button><button class="btn" id="anaBtn">📖 语法与翻译方法</button>
           <a class="btn" href="#/quiz/sent:${m.id}:${si}">📝 本句测验</a><a class="btn" href="${url('word', si)}">🔤 逐词学习 ›</a></div>
         <div class="row gap"><button class="btn ${done ? '' : 'primary'} grow" id="sentDone">${done ? '✓ 已学会' : '✓ 学会了，下一句'}</button></div>` + pager('sent');
@@ -118,7 +120,8 @@ export async function render(root, [id], params = {}) {
       ${m.sentences.length ? '' : typer()}
     </section>`;
   const typer = () => `
-    <h3>边听边打</h3><p class="muted small">按「⏱ 插入时间点」在光标处记下当前播放时间，然后打这一句：<code>[00:12] English | 中文</code>（中文可省略）。写完点保存，就会生成带原录音时间段的句子。<b>软件不提供自动转写</b>；也可以把音频交给别的工具转写后把文字贴到这里。</p>
+    <div class="row gap"><a class="btn primary grow" id="toAsr" href="#/asr/${m.id}">🤖 自动转成文字</a></div>
+    <h3>或者：边听边打</h3><p class="muted small">按「⏱ 插入时间点」在光标处记下当前播放时间，然后打这一句：<code>[00:12] English | 中文</code>（中文可省略）。写完点保存，就会生成带原录音时间段的句子。</p>
     <textarea id="typed" rows="8" placeholder="[00:03] Hello, how can I help you? | 你好，需要什么帮助？"></textarea>
     <div class="row gap"><button class="btn" id="stamp">⏱ 插入时间点</button><button class="btn primary grow" id="saveTyped">保存为句子</button></div>`;
 
@@ -126,12 +129,14 @@ export async function render(root, [id], params = {}) {
     st.cur = i; $$('.sent', root).forEach(e => e.classList.toggle('active', +e.dataset.i === i));
     $(`.sent[data-i="${i}"]`, root)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
+  /** 播放这句的原声（录音/视频里的那一段）。再次调用会打断上一次。 */
+  let origTok = 0;
+  const playOrig = async (s, rate = st.rate) => {
+    const my = ++origTok; const a = au || (au = new Audio(audioUrl)); a.pause(); a.playbackRate = rate; a.preservesPitch = true; a.currentTime = s.t0; await a.play();
+    await new Promise(res => { const fn = () => { if (my !== origTok || (s.t1 != null && a.currentTime >= s.t1) || a.ended || a.paused) { if (my === origTok) a.pause(); a.removeEventListener('timeupdate', fn); a.removeEventListener('pause', fn); res(); } }; a.addEventListener('timeupdate', fn); a.addEventListener('pause', fn); });
+  };
   const say = async (s, rate = st.rate) => {
-    if (st.orig && audioUrl && s.t0 != null) {
-      const a = au || (au = new Audio(audioUrl)); a.playbackRate = rate; a.currentTime = s.t0; await a.play();
-      await new Promise(res => { const fn = () => { if ((s.t1 != null && a.currentTime >= s.t1) || a.ended) { a.pause(); a.removeEventListener('timeupdate', fn); res(); } }; a.addEventListener('timeupdate', fn); });
-      return;
-    }
+    if (st.orig && hasOrig(s)) return playOrig(s, rate);
     return tts.speak(s.en, { rate });
   };
   /** 在 [ra, rb] 范围内播放；all=false 只播 start 这一句。 */
@@ -181,11 +186,13 @@ export async function render(root, [id], params = {}) {
       const row = e.target.closest('.sent'); if (!row) return; const i = +row.dataset.i, s = m.sentences[i];
       if (e.target.closest('[data-play]')) { if (root.classList.contains('playing') && st.cur === i && !st.loopOne) stopAll(); else run(i, false); }
       else if (e.target.closest('[data-practice]')) openPractice(ctx, s);
+      else if (e.target.closest('[data-orig]')) { const my = ++st.tok; tts.cancel(); mark(i); root.classList.add('playing'); playOrig(s).catch(err => toast('原声无法播放：' + err.message)).finally(() => { if (my === st.tok) { root.classList.remove('playing'); $$('.sent', root).forEach(x => x.classList.remove('active')); } }); }
       else if (e.target.closest('[data-star]')) { const btn = e.target.closest('[data-star]'); toggleStar(ctx, s).then(on => { btn.textContent = on ? '★' : '☆'; btn.classList.toggle('on', on); }); }
       else if (e.target.closest('[data-w]')) openWordSheet(ctx, s, +e.target.closest('[data-w]').dataset.k);
     });
     // 句级
     $('#pract', root)?.addEventListener('click', () => openPractice(ctx, m.sentences[si]));
+    $('#origSent', root)?.addEventListener('click', () => { st.tok++; tts.cancel(); playOrig(m.sentences[si]).catch(err => toast('原声无法播放：' + err.message)); });
     $('#anaBtn', root)?.addEventListener('click', () => openPractice(ctx, m.sentences[si], { focus: 'analysis' }));
     $('#sentDone', root)?.addEventListener('click', async () => {
       const s = m.sentences[si]; const done = !!m.progress?.done?.[s.id];

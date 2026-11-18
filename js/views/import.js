@@ -4,9 +4,9 @@ import { parseBilingual, parseSubtitles } from '../textproc.js';
 import { session, aiBtn } from '../state.js';
 import * as db from '../db.js';
 import * as pb from '../pdfbook.js';
-import { $, $$, esc, go, toast } from '../ui.js';
+import { $, $$, esc, go, toast, confirmDlg } from '../ui.js';
 
-const MODES = [['paste', '粘贴'], ['file', '文件'], ['ocr', '截图'], ['ai', '情景'], ['audio', '录音']];
+const MODES = [['paste', '粘贴'], ['file', '文件'], ['ocr', '截图'], ['ai', '情景'], ['audio', '录音/视频']];
 const EXAMPLE = `Doctor: Where does it hurt today?
 医生：你今天哪里不舒服？
 Patient: My neck and shoulder hurt, especially when I turn my head.
@@ -80,16 +80,59 @@ export async function render(root, _a, params) {
       try { const r = await ai.generateScene(desc); toDraft(r.sentences, { title: r.title, tags: r.tags, source: 'ai' }); }
       catch (err) { st.textContent = '没有生成成功：' + err.message; b.disabled = false; }
     };
-  } else if (mode === 'audio') {
-    p.innerHTML = `<p class="muted">上传一段录音（mp3 / m4a / wav），可变速 0.5–1.5 倍、圈一段反复听。<b>本软件不做假的“一键转写”</b>：你可以边听边打字，并给每句打上时间点。</p>
-      <label class="drop"><input type="file" id="aud" accept="audio/*,.mp3,.m4a,.wav" hidden><b>点这里选择录音文件</b><span class="muted">mp3 · m4a · wav</span></label><div id="st" class="muted" role="status"></div>`;
-    $('#aud', p).onchange = async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      const id = db.newId(); await db.blobs.set('audio:' + id, f);
-      const m = { id, title: f.name.replace(/\.[^.]+$/, ''), tags: ['录音'], source: 'audio', audioName: f.name, sentences: [] };
-      await db.materials.save(m); go('#/lesson/' + id);
-    };
-  }
+  } else if (mode === 'audio') audioPanel(p);
+}
+
+/** 录音 / 视频：现场录音或选文件 → 读出声音 → 保存原声 → 自动转写（#/asr/id） */
+function audioPanel(p) {
+  p.innerHTML = `<p class="muted">用身边真实的英语声音来学：现场录一段，或选手机里的录音、视频。软件自动转成文字，生成句子、生词和练习，每句都能回放原声跟读。</p>
+    <div class="grid2 audbtns"><button class="btn primary big" id="recBtn">🎙 现场录音</button>
+      <label class="btn big" id="pickBtn"><input type="file" id="aud" accept="audio/*,video/*,.mp3,.m4a,.aac,.wav,.ogg,.opus,.webm,.mp4,.mov,.m4v,.3gp" hidden>📁 选择录音/视频</label></div>
+    <div id="recbox"></div><div id="st" role="status"></div>
+    <ul class="muted small tips"><li>手机相册里的视频：点「选择录音/视频」→「照片图库」（安卓选「相册」或「图库」）。</li>
+      <li>苹果「语音备忘录」的录音：在语音备忘录里点这条录音 →「…」→「分享」→「存储到“文件”」，再回来点「选择录音/视频」→「浏览」选它。</li></ul>`;
+  $('#aud', p).onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) takeAudio(p, f, f.name); };
+  $('#recBtn', p).onclick = () => recordFlow(p);
+}
+const fmtClk = s => { s = Math.floor(s); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+async function recordFlow(p) {
+  const box = $('#recbox', p), btn = $('#recBtn', p); const rec = await import('../recorder.js');
+  btn.disabled = true; box.innerHTML = '<div class="card recbox"><p class="muted">正在打开麦克风…（第一次会请求「麦克风」权限，请点「允许」）</p></div>';
+  let r;
+  try { r = await rec.start({ onTick: ({ sec, level, state }) => { const t = $('#rtime', box); if (!t) return; t.textContent = fmtClk(sec); $('#rlvl', box).style.width = Math.round(Math.min(1, level * 2.2) * 100) + '%'; box.querySelector('.recbox').classList.toggle('paused', state === 'paused'); if (sec >= 3600 && state === 'recording') { r.pause(); toast('已录满 60 分钟，自动暂停。建议分段录。', 6000); } } }); }
+  catch (e) { btn.disabled = false; box.innerHTML = `<div class="note err" id="micErr">🎙 ${esc(e.message)}</div>`; return; }
+  box.innerHTML = `<div class="card recbox"><div class="rechead"><span class="rdot"></span><b id="rtime" class="rtime">00:00</b><span class="muted small" id="rstate">录音中</span></div>
+    <div class="rlvl" aria-hidden="true"><i id="rlvl"></i></div>
+    <div class="row gap"><button class="btn" id="rPause">⏸ 暂停</button><button class="btn primary grow" id="rStop">■ 完成</button><button class="btn" id="rCancel">取消</button></div>
+    <p class="muted small">点「完成」后自动转成文字。录音时请保持屏幕亮着、不要切到别的 App（iPhone 锁屏或切走会中断录音）。录音只存在这台设备上。</p></div>`;
+  $('#rPause', box).onclick = e => { const b = e.currentTarget; if (r.state() === 'recording') { r.pause(); b.textContent = '▶ 继续'; $('#rstate', box).textContent = '已暂停'; } else { r.resume(); b.textContent = '⏸ 暂停'; $('#rstate', box).textContent = '录音中'; } };
+  $('#rCancel', box).onclick = () => { r.cancel(); box.innerHTML = ''; btn.disabled = false; toast('已取消录音'); };
+  $('#rStop', box).onclick = async e => {
+    e.currentTarget.disabled = true; const out = await r.stop(); btn.disabled = false; box.innerHTML = '';
+    if (out.sec < 1 || !out.blob.size) return toast('录音太短了，再录一次吧');
+    const d = new Date(); const name = `现场录音 ${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const rm = await import('../recorder.js');
+    takeAudio(p, new File([out.blob], name + '.' + rm.extOf(out.mime), { type: out.mime }), name, { recorded: true });
+  };
+}
+/** 读出声音（视频也只取声音）→ 存原声 → 去转写页 */
+async function takeAudio(p, file, name, { recorded = false } = {}) {
+  const T = await import('../transcribe.js'); const st = $('#st', p);
+  const mb = file.size / 1e6, isVideo = /^video\//.test(file.type) || (!file.type && /\.(mp4|mov|m4v|3gp)$/i.test(file.name));
+  if (mb > T.LIMITS.fileMB && !await confirmDlg(`这个文件有 ${Math.round(mb)} MB，超过建议的 ${T.LIMITS.fileMB} MB：手机可能内存不够，读取中途退出。建议先剪短（只留要学的部分）。仍然继续吗？`, { ok: '继续' })) return;
+  const t0 = Date.now(); st.innerHTML = `<div class="card"><b>正在读取${isVideo ? '视频里的' : ''}声音…</b> <span class="muted small">${esc(file.name)} · ${T.fmtMB(file.size)}</span><div class="muted small" id="rdt">只在本机读取，不上传。</div></div>`;
+  const tick = setInterval(() => { const x = $('#rdt', st); if (x) x.textContent = `只在本机读取，不上传。已用 ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 1000);
+  let pcm;
+  try { pcm = await T.decodeToPcm(file); }
+  catch (e) { clearInterval(tick); st.innerHTML = `<div class="note err">${esc(e.message)}</div>`; return; }
+  clearInterval(tick);
+  const id = db.newId();
+  // 视频只保留声音（16kHz 单声道 WAV，约 1.9 MB/分钟），不把几百 MB 的视频塞进本机数据库
+  const blob = isVideo ? T.encodeWav(pcm) : file;
+  try { await db.blobs.set('audio:' + id, blob); }
+  catch (e) { st.innerHTML = `<div class="note err">保存录音失败：${esc(e.message)}（可能是手机存储空间不够）</div>`; return; }
+  const m = { id, title: name.replace(/\.[^.]+$/, ''), tags: [recorded ? '现场录音' : isVideo ? '视频' : '录音'], source: 'audio', audioName: file.name, duration: +(pcm.length / T.SR).toFixed(1), fromVideo: isVideo || undefined, sentences: [] };
+  await db.materials.save(m); session.asr = { id, pcm }; go('#/asr/' + id);
 }
 
 const fmtT = ms => ms < 90000 ? Math.round(ms / 1000) + ' 秒' : Math.round(ms / 60000) + ' 分钟';
