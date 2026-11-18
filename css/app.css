@@ -170,3 +170,23 @@ mark{background:#ffe9a8;border-radius:3px;padding:0 1px}
 .ansrow{flex-wrap:nowrap}.ansrow .btn.big{width:auto}
 .dunnofb{text-align:left;font-size:14px}.nextdue{margin:6px 0}.selfchk{margin:8px 0}
 .tag.mastered{background:#eef0fb;color:#28306b}
+/* v1.4 录音 / 视频 → 自动转写 */
+.audbtns{margin:10px 0}.btn.big{min-height:64px;font-size:17px;display:flex;align-items:center;justify-content:center;gap:6px;text-align:center}
+.tips{padding-left:18px;margin:8px 0}.tips li{margin:4px 0}
+.note.err{background:#fdeceb;border-color:#efb8b2}
+.recbox .rechead{display:flex;align-items:center;gap:10px}.rtime{font-size:34px;font-variant-numeric:tabular-nums;letter-spacing:1px}
+.rdot{width:14px;height:14px;border-radius:50%;background:#d93a2b;animation:rblink 1s infinite}.recbox.paused .rdot{animation:none;background:#bbb}
+@keyframes rblink{50%{opacity:.25}}
+.rlvl{height:8px;background:#e4e1d8;border-radius:4px;margin:10px 0;overflow:hidden}.rlvl i{display:block;height:100%;width:0;background:#3aa17e;transition:width .15s}
+.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;cursor:pointer;background:#fff}
+.opt.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset;background:#f4faf7}.opt input{width:auto;margin-top:4px}
+.limits{background:#eef5fb;border:1px solid #c9dcec;border-radius:12px;padding:10px 12px;margin:10px 0}
+.est{border-left:4px solid var(--ac);padding:6px 10px;margin:10px 0;font-size:16px}
+.asrau{width:100%;margin:6px 0 4px}
+.bar.big{height:12px;border-radius:6px}.pm{font-size:18px;margin:2px 0 4px;font-variant-numeric:tabular-nums}
+.ptext{margin:10px 0;padding:8px 10px;background:#fafaf7;border-radius:10px;color:#555;font-size:14px;min-height:1.5em;max-height:7.5em;overflow:hidden}
+.ptext:empty{display:none}
+.mini.segplay{color:var(--ac);font-weight:600}.mini.segplay small{color:var(--mut);font-weight:400}.mini.segplay.on,.mini.orig:active{background:var(--ac);color:#fff}
+.mini.orig{color:var(--ac)}
+.rc-h .mini{white-space:nowrap;flex:none}.rc-h .spk{min-width:0;flex:1 1 60px}
+.audbtns .btn{white-space:nowrap}
