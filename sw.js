@@ -1,9 +1,12 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = 'a97015f7d1';
+const VERSION = '92f7b262ae';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
 const isVendor = u => /\/vendor\/(tesseract|pdfjs|mammoth)\//.test(u.pathname);
+// 本机转写的运行库（jsDelivr 上固定版本的 transformers.js 与 WASM）：首次用时缓存，之后离线可用。模型文件由 transformers.js 自己存进「transformers-cache」。
+const ASR = 'zizhuxue-asr-1';
+const isAsrLib = u => u.hostname === 'cdn.jsdelivr.net' && /^\/npm\/@huggingface\/transformers@\d/.test(u.pathname);
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const res = await fetch('precache.json', { cache: 'no-store' }); const list = await res.clone().json();
@@ -15,12 +18,16 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k.startsWith('zizhuxue-') && k !== CACHE && k !== VENDOR) await caches.delete(k);
+    for (const k of await caches.keys()) if (k.startsWith('zizhuxue-') && k !== CACHE && k !== VENDOR && k !== ASR) await caches.delete(k);
     await self.clients.claim();
   })());
 });
 self.addEventListener('fetch', e => {
   const req = e.request; const url = new URL(req.url);
+  if (req.method === 'GET' && isAsrLib(url)) {
+    e.respondWith((async () => { const c = await caches.open(ASR); const hit = await c.match(req.url); if (hit) return hit; const res = await fetch(req); if (res.ok) c.put(req.url, res.clone()); return res; })());
+    return;
+  }
   if (req.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith((async () => {
     const c = await caches.open(isVendor(url) ? VENDOR : CACHE);
