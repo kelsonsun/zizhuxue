@@ -201,3 +201,35 @@ export async function translateBatch(texts, dir) {
   if (t.length !== texts.length || t.some(x => !x)) throw new AIError('AI 返回的译文条数不对，请重试', 'BAD_FORMAT');
   return t;
 }
+
+/** v1.6【译文对齐】拆分一句时：把已有的整句译文按原文各段切开（不重新翻译，只在必要时微调连接词/标点）。返回等长数组。 */
+export async function alignSplit(srcPieces, other, dir = 'en2zh') {
+  const lang = dir === 'en2zh' ? '中文' : '英文';
+  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
+    `【译文对齐】一句原文被用户拆成了 ${srcPieces.length} 段，它原来有一整句${lang}译文。请把这句译文按原文的分段切成对应的 ${srcPieces.length} 段：每段只包含对应那段原文的意思。` +
+    `尽量直接切开原译文、保留原用字；只有语序必须调整时才微调措辞，不要重新翻译、不要遗漏或增加意思。\n原文各段：${JSON.stringify(srcPieces)}\n原译文：${other}\n` +
+    `返回 JSON：{"t":["第1段译文",...],"changed":是否改动了措辞(true/false)}，数组长度必须是 ${srcPieces.length}。` }], { temperature: 0.1, timeout: 60000 });
+  const t = Array.isArray(r?.t) ? r.t.map(str) : [];
+  if (t.length !== srcPieces.length || t.some(x => !x)) throw new AIError('AI 返回的分段条数不对', 'BAD_FORMAT');
+  return { t, changed: !!r.changed };
+}
+
+/** v1.6【作答判分】翻译题：判断学习者的译文意思对不对（意思对、说法不同也算对）。返回 {score 0-100, ok, comment, better}。 */
+export async function judgeTranslation({ src, ref = '', answer, dir }) {
+  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
+    `【作答判分】学习者在做${dir === 'en2zh' ? '英译中' : '中译英'}练习。原文：${src}\n${ref ? '参考译文：' + ref + '\n' : ''}学习者的答案：${answer}\n` +
+    `请只看意思是否准确完整（不要求和参考译文字面一致；口语、同义说法都算对；漏掉关键信息、否定/时态/主语弄反算错）。` +
+    `返回 JSON：{"score":0-100的整数,"ok":true或false,"comment":"一句中文点评（指出漏掉或弄错的地方）","better":"更好的说法（可选）"}` }], { temperature: 0.1, timeout: 45000 });
+  const score = Math.max(0, Math.min(100, Math.round(+r?.score)));
+  if (!Number.isFinite(score)) throw new AIError('AI 没有给出分数', 'BAD_FORMAT');
+  return { score, ok: typeof r.ok === 'boolean' ? r.ok : score >= 70, comment: str(r.comment), better: str(r.better) };
+}
+
+/** v1.6【阅读理解出题】给一段用户自己材料里的英文（2–4 句），出一道中文的理解选择题。返回 {q, options[], answer(下标), why}（格式由调用方检查）。 */
+export async function passageQuiz(en, zh = '') {
+  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
+    `【阅读理解出题】下面是学习者自己材料里的一小段英文${zh ? '（附参考译文）' : ''}。请出一道考“读懂这段话”的单选题：问题和选项都用简体中文，` +
+    `考段落的要点、细节、因果或推断（不要考单个词的字面翻译，不要出原文没有依据的题）；4 个选项，只有 1 个正确，干扰项要看起来合理但和原文不符。\n` +
+    `英文：${en}\n${zh ? '参考译文：' + zh + '\n' : ''}返回 JSON：{"q":"问题","options":["A","B","C","D"],"answer":正确选项的下标(0-3),"why":"一句话说明依据（引用原文）"}` }], { temperature: 0.3, timeout: 60000 });
+  return r;
+}

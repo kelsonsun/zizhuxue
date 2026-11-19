@@ -38,6 +38,7 @@ async function doRender(seq) {
   const params = Object.fromEntries(new URLSearchParams(qs || ''));
   if (cleanup) { try { cleanup(); } catch {} cleanup = null; }
   tts.cancel();
+  session.trail = [...(session.trail || []), location.hash || '#/'].slice(-6); // 反馈里附上“之前去过的页面”
   const root = $('#app');
   const loader = routes[name] ?? routes[''];
   const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', roots: 'library', review: 'review', me: 'me' }[name] ?? '';
@@ -50,7 +51,8 @@ async function doRender(seq) {
     await mod.render(root, args.map(decodeURIComponent), params);
   } catch (e) {
     console.error(e);
-    root.innerHTML = `<div class="empty"><p>页面出错了：${esc(e.message)}</p><a class="btn" href="#/">回到首页</a></div>`;
+    root.innerHTML = `<div class="empty"><p>页面出错了：${esc(e.message)}</p><a class="btn" href="#/">回到首页</a><button class="btn" id="errFb">🐞 反馈这个问题</button></div>`;
+    $('#errFb', root)?.addEventListener('click', async () => (await import('./feedbackui.js')).openFeedback({ type: 'bug', text: `页面出错了：${e.message}\n（我当时在做：）` }));
   }
 }
 

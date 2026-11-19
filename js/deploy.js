@@ -4,3 +4,5 @@
 // 自建同步服务器（sync-server/server.js 同端口提供应用）会自动把这个文件改写成 true + 它的 PUBLIC_URL。
 export const SYNC_AVAILABLE = false;
 export const SYNC_URL = '';
+// v1.6 反馈收件邮箱：「反馈问题/建议」里“用邮件发送”的收件人。还没定 → 留空（邮件 App 打开后自己填收件人）。定了只改这里。
+export const FEEDBACK_EMAIL = '';

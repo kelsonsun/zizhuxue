@@ -59,12 +59,76 @@ export function planSplit(row, cuts, { pauses = [] } = {}) {
   }
   return { field, toks, cuts, pieces };
 }
-/** 把计划应用到一行：第一段保留原句的 id（学习记录、生词卡的来源句还在），其余是新句。 */
-export function applySplit(row, plan) {
-  const other = plan.field === 'en' ? 'zh' : 'en';
+// —— v1.6 译文跟着拆：用户定好原文切点后，把已有译文分成对应的段（不重新翻译）——
+const STRONG = /[。！？；!?;.…]["”’」』）)]*$/, WEAK = /[，、,：:—]["”’」』）)]*$/;
+const lenOf = (s, zh) => zh ? (s.match(/[\u3400-\u9fffA-Za-z0-9]/g) || []).length : (s.match(/[A-Za-z0-9]/g) || []).length;
+/**
+ * 按原文各段的长度比例，在译文里找对应的切点（优先落在句号/逗号等标点后面）。
+ * toks：译文的词/字；weights：原文各段的长度；srcEnds：原文各段文字（看结尾标点）。返回 k=weights.length-1 个切点（第 j 个词/字之后断开），译文太短时返回 null。
+ */
+export function autoCutsOther(toks, weights, srcEnds = []) {
+  const k = weights.length - 1, n = toks.length; if (k <= 0) return []; if (n < k + 1) return null;
+  const W = weights.map(w => Math.max(0.5, w)), tot = W.reduce((a, b) => a + b, 0); const target = []; let acc = 0;
+  for (let m = 0; m < k; m++) { acc += W[m]; target.push(acc / tot); }
+  const zh = toks.some(t => /[\u3400-\u9fff]/.test(t.s)); const L = [0]; for (const t of toks) L.push(L[L.length - 1] + Math.max(1, lenOf(t.s, zh)));
+  // 标点对标点：原文这段以句号/问号结尾 → 译文也尽量断在句号/问号后；以逗号结尾 → 断在逗号后（中英文长短比例差别大，标点比长度更可靠）
+  const PEN = { strong: { strong: 0, weak: 0.12, none: 0.3 }, weak: { weak: 0, strong: 0.08, none: 0.22 }, none: { strong: 0.04, weak: 0.04, none: 0.1 } };
+  const kindOf = s => STRONG.test(s) ? 'strong' : WEAK.test(s) ? 'weak' : 'none';
+  const ends = (srcEnds || []).map(kindOf);
+  const cost = (m, j) => Math.abs(L[j + 1] / L[n] - target[m]) + PEN[ends[m] || 'none'][kindOf(toks[j].s)];
+  // 动态规划：第 m 个切点放在 j，切点严格递增
+  const INF = 1e9; let prev = Array(n).fill(INF), back = [];
+  for (let j = 0; j < n - 1; j++) prev[j] = cost(0, j);
+  for (let m = 1; m < k; m++) {
+    const cur = Array(n).fill(INF), b = Array(n).fill(-1); let best = INF, bi = -1;
+    for (let j = 0; j < n - 1; j++) { if (j - 1 >= 0 && prev[j - 1] < best) { best = prev[j - 1]; bi = j - 1; } if (bi >= 0) { cur[j] = best + cost(m, j); b[j] = bi; } }
+    back.push(b); prev = cur;
+  }
+  let j = -1, bv = INF; for (let x = 0; x < n - 1; x++) if (prev[x] < bv) { bv = prev[x]; j = x; }
+  if (j < 0) return null; const out = [j]; for (let m = k - 2; m >= 0; m--) { j = back[m][j]; out.unshift(j); }
+  return out;
+}
+/** 译文按切点取各段文字 */
+export function textsByCuts(text, toks, cuts) {
+  const out = []; let a = 0;
+  for (const c of [...cuts, toks.length - 1]) { out.push(toks.length ? text.slice(toks[a].a, toks[c].b).trim() : ''); a = c + 1; }
+  return out;
+}
+/**
+ * 译文怎么分：
+ *  · texts（AI 对齐结果 / 各段重新翻译）条数对得上就直接用；
+ *  · 否则用用户在预览里点的切点 cuts；没点过就按标点 + 长度比例自动对齐（how='auto'）。
+ * 返回 {field, toks, cuts, texts, how}；how：none 没有译文 / auto 自动对齐 / user 用户调过 / ai AI 对齐 / ai-adj AI 对齐并微调措辞 / mt:通道 重新翻译 / short 译文太短分不开
+ */
+export function planOther(row, plan, { cuts = null, texts = null, how = null } = {}) {
+  const field = plan.field === 'en' ? 'zh' : 'en', zh = field === 'zh', text = (row[field] || '').trim(), n = plan.pieces.length;
+  const toks = tokenize(text, zh);
+  if (Array.isArray(texts) && texts.length === n) return { field, toks, cuts: null, texts: texts.map(t => String(t || '').trim()), how: how || 'ai' };
+  if (!text) return { field, toks, cuts: [], texts: Array(n).fill(''), how: 'none' };
+  let cs = null, h = 'user';
+  if (Array.isArray(cuts)) { cs = [...new Set(cuts.map(Number))].filter(j => j >= 0 && j < toks.length - 1).sort((a, b) => a - b); if (cs.length !== n - 1) cs = null; }
+  if (!cs) { cs = autoCutsOther(toks, plan.pieces.map(p => lenOf(p.text, plan.field === 'zh')), plan.pieces.map(p => p.text)); h = 'auto'; }
+  if (!cs) return { field, toks, cuts: [], texts: [text, ...Array(n - 1).fill('')], how: 'short' };
+  return { field, toks, cuts: cs, texts: textsByCuts(text, toks, cs), how: h };
+}
+/** AI 返回的各段译文 → 如果只是把原译文切开（去掉空白后拼起来一字不差），换算成切点，用户还能继续点着调 */
+export function cutsFromTexts(text, toks, texts) {
+  const norm = s => String(s || '').replace(/\s+/g, ''); if (norm(texts.join('')) !== norm(text)) return null;
+  const cuts = []; let acc = 0, ti = 0;
+  for (let k = 0; k < texts.length - 1; k++) {
+    acc += norm(texts[k]).length; let got = 0, j = -1;
+    for (let x = 0; x < toks.length; x++) { got += norm(toks[x].s).length; if (got === acc) { j = x; break; } if (got > acc) return null; }
+    if (j < 0 || j < ti) return null; cuts.push(j); ti = j + 1;
+  }
+  return cuts;
+}
+/** 把计划应用到一行：第一段保留原句的 id（学习记录、生词卡的来源句还在），其余是新句。other：译文怎么分（planOther 的结果）。 */
+export function applySplit(row, plan, other = planOther(row, plan)) {
+  const of = other.field;
   return plan.pieces.map((p, i) => {
     const base = i === 0 ? { ...row } : { speaker: row.speaker || '' };
-    const r = { ...base, [plan.field]: p.text, [other]: i === 0 ? (row[other] || '') : '' };
+    const r = { ...base, [plan.field]: p.text, [of]: other.texts[i] || '' };
+    if (String(other.how).startsWith('mt:')) r.trNew = String(other.how).slice(3); else if (row.tr && other.texts[i]) r.trNew = row.tr; else delete r.trNew; // 各段重新翻译：保存后标“机器翻译，可改”
     if (p.t0 != null) { r.t0 = p.t0; r.t1 = p.t1; }
     if (p.wt) r.wt = p.wt; else delete r.wt;
     return r;
@@ -73,7 +137,8 @@ export function applySplit(row, plan) {
 /** 合并两句（与拆分对称）：时间取并集，逐词时间都有效才拼起来。 */
 export function mergeRows(a, n) {
   const ta = tokensOfRow(a), tn = tokensOfRow(n);
-  const r = { ...a, en: ((a.en || '') + ' ' + (n.en || '')).trim(), zh: ((a.zh || '') + (a.zh && n.zh ? ' ' : '') + (n.zh || '')).trim() };
+  const zj = (x, y) => (x && y ? (/[\u3400-\u9fff，。！？；：、”’）]$/.test(x) && /^[\u3400-\u9fff“‘（]/.test(y) ? x + y : x + ' ' + y) : x || y).trim();
+  const r = { ...a, en: ((a.en || '') + ' ' + (n.en || '')).trim(), zh: zj((a.zh || '').trim(), (n.zh || '').trim()) };
   if (n.t1 != null) r.t1 = n.t1; if (r.t0 == null && n.t0 != null) r.t0 = n.t0;
   if (wtOk(a, ta) && wtOk(n, tn) && fieldOf(a) === fieldOf(n)) r.wt = [...a.wt, ...n.wt]; else delete r.wt;
   return r;
