@@ -1,5 +1,5 @@
 {
- "version": "ee90002697",
+ "version": "13515e9989",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -15,7 +15,10 @@
   "js/db.js",
   "js/deploy.js",
   "js/dict.js",
+  "js/drill.js",
   "js/extract.js",
+  "js/feedback.js",
+  "js/feedbackui.js",
   "js/importers.js",
   "js/install.js",
   "js/matdelete.js",
@@ -47,6 +50,7 @@
   "js/views/audioread.js",
   "js/views/book.js",
   "js/views/draft.js",
+  "js/views/drillrun.js",
   "js/views/home.js",
   "js/views/import.js",
   "js/views/lesson.js",
