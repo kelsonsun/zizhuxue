@@ -28,6 +28,7 @@ export async function render(root) {
   <h2>把真实内容变成教材</h2>
   <div class="quick">
     <a class="qbtn" href="#/import?m=paste"><b>📋 粘贴对话 / 字幕</b><span>中英文本、srt、vtt、txt、docx、pdf</span></a>
+    <a class="qbtn" href="#/snap" id="toSnap"><b>📷 拍照即查</b><span>拍一张图，直接点图上的词：查词、翻译、做卡</span></a>
     <a class="qbtn" href="#/import?m=ocr"><b>📷 截图识别</b><span>手机截图里的英文，本地识别</span></a>
     <a class="qbtn" href="#/import?m=ai"><b>💬 描述实际情景</b><span>用中文说，生成英文对话（需AI）</span></a>
   </div>
@@ -36,7 +37,7 @@ export async function render(root) {
   <div class="list">${top.slice(0, 4).map(m => `<a class="item" href="${m.kind === 'book' ? '#/book/' : '#/lesson/'}${m.id}"><b>${m.kind === 'book' ? '📖 ' : ''}${esc(m.title)}</b><span class="muted">${m.kind === 'book' ? mats.filter(x => x.bookId === m.id).length + ' 章' : m.sentences.length + ' 句'} · ${fmtDate(m.updatedAt)}${m.sample ? ' · 示例' : ''}</span></a>`).join('') || '<p class="muted">暂无材料</p>'}</div>
   <div id="installBox"></div>
   <p class="muted small privacy">🔒 你的内容只保存在这台设备的浏览器里。只有你主动使用 AI 或确认使用公共翻译时，相关句子才会发出去。</p>`;
-  import('./quickbox.js').then(q => q.mountQuick($('#quickBox', root))).catch(e => console.warn(e));
+  import('./quickbox.js').then(async q => { const qb = await q.mountQuick($('#quickBox', root)); if (session.quickQ) { const t = session.quickQ; session.quickQ = null; qb.run(t); } }).catch(e => console.warn(e)); // v1.8 分享来的词句直接查
   import('./daily.js').then(d => d.mountDaily($('#dailyBox', root))).catch(e => console.warn(e));
   $('#fbHome', root).onclick = async () => (await import('../feedbackui.js')).openFeedback();
   const box = $('#installBox', root);

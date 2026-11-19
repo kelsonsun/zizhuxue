@@ -46,11 +46,15 @@ export async function query(q, { prov } = {}) {
   return { q: s, kind, dir, tr: await mt(s, dir, p), prov: p };
 }
 
-export async function mountQuick(box, { onCard } = {}) {
+/**
+ * opts.ctx：() => {en} 当前“原句”（拍照即查：图上的那句话），做生词卡时优先用它当例句；opts.hist=false 不显示查询历史；opts.source 卡片来源
+ */
+export async function mountQuick(box, { onCard, ctx = null, hist = true, source = 'lookup' } = {}) {
   box.innerHTML = `<form class="qk" id="qkForm" autocomplete="off"><input id="qkIn" type="search" enterkeyhint="search" placeholder="查单词 / 翻译句子（英 ↔ 中）" aria-label="查词或翻译">
     <button class="btn primary" id="qkGo" type="submit">查</button></form><div id="qkRes" role="status"></div><div id="qkHist"></div>`;
   const res = $('#qkRes', box), hb = $('#qkHist', box);
   const drawHist = async () => {
+    if (!hist) { hb.innerHTML = ''; return; }
     const h = await histAll();
     hb.innerHTML = h.length ? `<div class="qkh"><span class="muted small">最近查过：</span>${h.slice(0, 6).map((x, i) => `<button class="chip qkhi" data-hi="${i}">${x.carded ? '⭐' : ''}${esc(x.q.length > 18 ? x.q.slice(0, 17) + '…' : x.q)}</button>`).join('')}<button class="chip" id="qkAll">全部（${h.length}）</button></div>` : '';
     $$('[data-hi]', hb).forEach(b => b.onclick = () => show(h[+b.dataset.hi], { fromHist: true }));
@@ -65,6 +69,7 @@ export async function mountQuick(box, { onCard } = {}) {
       const w = r.word; const mine = [...L.findInMats(mats, w.lemma || w.w), ...L.findInMats(mats, w.w)].filter((x, i, a) => a.findIndex(y => y.sid === x.sid && y.mid === x.mid) === i).slice(0, 3); r.mine = mine;
       parts.push(`<div class="qkw"><b class="qkterm">${esc(w.w)}</b>${w.lemma !== w.w ? ` <span class="muted small">原形 ${esc(w.lemma)}</span>` : ''} ${w.phonetic ? `<span class="muted">/${esc(w.phonetic)}/</span>` : ''} <button class="mini" id="qkSay" aria-label="朗读">🔊</button>
         ${w.rank ? `<span class="tag">词频第 ${w.rank}</span>` : ''}</div><div class="senses">${S.fullHtml(w.zh)}</div>
+        ${ctx?.()?.en ? `<div class="muted small">图上的原句：</div><div class="ex small qkctx">${esc(ctx().en)}</div>` : ''}
         ${mine.length ? `<div class="muted small">你的材料里：</div>${mine.map(x => `<div class="ex small">${esc(x.en)}<span class="muted"> —《${esc(x.title)}》</span></div>`).join('')}` : '<div class="muted small">你的材料里还没出现过这个词。</div>'}`);
     } else if (r.rev) {
       parts.push(`<div class="muted small">“${esc(r.q)}”的英文（离线词典反查，常用的在前；义项要自己挑）：</div><div class="qkrev">${r.rev.map((x, i) => `<div class="qkri"><b>${esc(x.w)}</b> <span class="muted small">${esc(S.briefAll(x.zh).text)}</span><button class="mini" data-rcard="${i}">＋卡</button></div>`).join('')}</div>`);
@@ -79,16 +84,17 @@ export async function mountQuick(box, { onCard } = {}) {
     $('#qkSay', res)?.addEventListener('click', () => tts.speak(r.word ? r.word.w : r.dir === 'en2zh' ? r.q : r.tr, { rate: settings.rate }).catch(e => toast(e.message)));
     $('#qkCard', res)?.addEventListener('click', () => makeFrom(r));
     $$('[data-rcard]', res).forEach(b => b.onclick = async () => { const x = r.rev[+b.dataset.rcard]; if (await existing(x.w)) return toast('已在生词本里'); const mine = L.findInMats(mats, x.w)[0];
-      await db.cards.save(makeCard({ type: 'word', term: x.w, zh: x.zh, sentence: mine ? { en: mine.en, zh: mine.zh } : null, material: mine?.mid || null, sentenceId: mine?.sid || null, source: 'lookup' }));
+      await db.cards.save(makeCard({ type: 'word', term: x.w, zh: x.zh, sentence: mine ? { en: mine.en, zh: mine.zh } : null, material: mine?.mid || null, sentenceId: mine?.sid || null, source }));
       b.textContent = '✓ 已加'; b.disabled = true; await markCarded(r.q); toast(`已做成生词卡「${x.w}」，会进入每日复习`); onCard?.(); });
     $('#qkRetr', res)?.addEventListener('click', () => pickProv(r));
   }
   async function makeFrom(r) {
     let c;
-    if (r.word) { const m0 = r.mine?.[0]; c = makeCard({ type: 'word', term: r.word.w, zh: r.word.zh, phonetic: r.word.phonetic, sentence: m0 ? { en: m0.en, zh: m0.zh } : null, material: m0?.mid || null, sentenceId: m0?.sid || null, source: 'lookup' }); }
+    const cx = ctx?.()?.en ? ctx() : null;
+    if (r.word) { const m0 = cx ? null : r.mine?.[0]; c = makeCard({ type: 'word', term: r.word.w, zh: r.word.zh, phonetic: r.word.phonetic, sentence: cx ? { en: cx.en, zh: cx.zh || '' } : m0 ? { en: m0.en, zh: m0.zh } : null, material: m0?.mid || null, sentenceId: m0?.sid || null, source }); }
     else { const en = r.dir === 'en2zh' ? r.q : r.tr, zh = r.dir === 'en2zh' ? r.tr : r.q; const nw = (en.match(/[A-Za-z][A-Za-z'’-]*/g) || []).length; const isWord = (r.kind === 'phrase' || r.kind === 'zhword' || r.kind === 'word') && nw >= 1 && nw <= 4;
-      const mine = isWord ? L.findInMats(await db.materials.all(), en)[0] : null;
-      c = makeCard({ type: isWord ? (/\s/.test(en.trim()) ? 'phrase' : 'word') : 'sentence', term: isWord ? en.trim().replace(/[.!?。！？]+$/, '') : en.trim(), zh, sentence: isWord ? (mine ? { en: mine.en, zh: mine.zh } : null) : { en: en.trim(), zh }, material: mine?.mid || null, sentenceId: mine?.sid || null, source: 'lookup', note: `查词翻译：${PROV_ZH[r.prov] || r.prov}` }); }
+      const mine = isWord && !cx ? L.findInMats(await db.materials.all(), en)[0] : null;
+      c = makeCard({ type: isWord ? (/\s/.test(en.trim()) ? 'phrase' : 'word') : 'sentence', term: isWord ? en.trim().replace(/[.!?。！？]+$/, '') : en.trim(), zh, sentence: isWord ? (cx ? { en: cx.en, zh: cx.zh || '' } : mine ? { en: mine.en, zh: mine.zh } : null) : { en: en.trim(), zh }, material: mine?.mid || null, sentenceId: mine?.sid || null, source, note: `查词翻译：${PROV_ZH[r.prov] || r.prov}` }); }
     await db.cards.save(c); await markCarded(r.q);
     toast(`已做成${c.type === 'sentence' ? '句子' : '生词'}卡片，会进入每日复习`); show(r, { fromHist: true }); drawHist(); onCard?.();
   }

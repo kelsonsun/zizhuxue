@@ -34,6 +34,7 @@ export async function render(root, _a, params) {
       <div class="row gap"><button class="btn primary grow" id="go">拆句预览</button><button class="btn" id="ex">填入示例</button></div>
       <p class="muted small">🔒 若内容涉及他人隐私（姓名、电话、病历），建议先去掉再导入。</p>`;
     $('#ex', p).onclick = () => { $('#txt', p).value = EXAMPLE; };
+    if (session.pendingText) { $('#txt', p).value = session.pendingText; session.pendingText = null; } // v1.8 分享进来的文字
     $('#go', p).onclick = () => {
       const rows = parseBilingual($('#txt', p).value); if (!rows.length) return toast('请先粘贴内容');
       toDraft(rows, { source: 'paste' });
@@ -41,8 +42,7 @@ export async function render(root, _a, params) {
   } else if (mode === 'file') {
     p.innerHTML = `<p class="muted">字幕（srt/vtt，中英双语字幕会自动配对）、txt、Word（docx）、PDF。文件只在本机读取。</p>
       <label class="drop"><input type="file" id="file" accept=".srt,.vtt,.txt,.md,.docx,.pdf" hidden><b>点这里选择文件</b><span class="muted">srt · vtt · txt · docx · pdf</span></label><div id="st" class="muted" role="status"></div>`;
-    $('#file', p).onchange = async (e) => {
-      const f = e.target.files[0]; if (!f) return;
+    const handle = async f => {
       $('#st', p).textContent = '正在读取 ' + f.name + ' …';
       try {
         if (imp.extOf(f.name) === 'pdf') return await bookFlow(p, f, toDraft);
@@ -53,14 +53,16 @@ export async function render(root, _a, params) {
         toDraft(rows, { title, source: r.kind === 'subtitle' ? 'subtitle' : imp.extOf(f.name) });
       } catch (err) { $('#st', p).textContent = '读取失败：' + err.message; }
     };
+    $('#file', p).onchange = e => { const f = e.target.files[0]; if (f) handle(f); };
+    if (session.pendingFile) { const f = session.pendingFile; session.pendingFile = null; handle(f); } // v1.8 从「分享到自主学」进来的文件
   } else if (mode === 'ocr') {
     p.innerHTML = `<p class="muted">选一张含英文的截图或照片，用手机上的「本地英文识别」读出文字（图片不会上传）。第一次使用需要加载约 5MB 的识别组件。</p>
+      <a class="note small snaplink" href="#/snap">想直接在图上点词查、翻译、做卡？试试 <b>📷 拍照即查</b></a>
       <label class="drop"><input type="file" id="img" accept="image/*" hidden><b>点这里选择截图 / 拍照</b><span class="muted">png · jpg · heic（视浏览器而定）</span></label>
       <div id="st" class="muted" role="status"></div>
       <textarea id="ocrtxt" rows="8" class="hidden" placeholder="识别结果会出现在这里，可以直接修改" aria-label="识别结果"></textarea>
       <div class="row gap hidden" id="ocract"><button class="btn primary grow" id="go">拆句预览</button></div>`;
-    $('#img', p).onchange = async (e) => {
-      const f = e.target.files[0]; if (!f) return;
+    const handleImg = async f => {
       const st = $('#st', p); st.textContent = '正在识别…（首次需加载组件）';
       try {
         const r = await imp.ocrImage(f, m => { st.textContent = `${m.status}${m.progress != null ? ' ' + Math.round(m.progress * 100) + '%' : ''}`; });
@@ -68,6 +70,8 @@ export async function render(root, _a, params) {
         st.textContent = `识别完成（平均置信度约 ${Math.round(r.confidence)}%）。请核对并修改错字，再点「拆句预览」。`;
       } catch (err) { st.textContent = '识别失败：' + err.message; }
     };
+    $('#img', p).onchange = e => { const f = e.target.files[0]; if (f) handleImg(f); };
+    if (session.pendingFile) { const f = session.pendingFile; session.pendingFile = null; handleImg(f); }
     $('#go', p).onclick = () => { const rows = parseBilingual($('#ocrtxt', p).value); if (!rows.length) return toast('没有可用文字'); toDraft(rows, { source: 'ocr' }); };
   } else if (mode === 'ai') {
     p.innerHTML = `<p class="muted">用中文描述你实际遇到或即将遇到的情景，AI 会生成贴合的英文对话和中文翻译（生成后可逐句修改）。</p>
@@ -93,6 +97,7 @@ function audioPanel(p) {
       <li>苹果「语音备忘录」的录音：在语音备忘录里点这条录音 →「…」→「分享」→「存储到“文件”」，再回来点「选择录音/视频」→「浏览」选它。</li></ul>`;
   $('#aud', p).onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) takeAudio(p, f, f.name); };
   $('#recBtn', p).onclick = () => recordFlow(p);
+  if (session.pendingFile) { const f = session.pendingFile; session.pendingFile = null; takeAudio(p, f, f.name); } // v1.8 分享进来的录音 / 视频
 }
 const fmtClk = s => { s = Math.floor(s); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
 async function recordFlow(p) {

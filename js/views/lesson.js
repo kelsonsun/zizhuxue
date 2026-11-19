@@ -110,7 +110,7 @@ export async function render(root, [id], params = {}) {
     ${levelBar()}${lv === 'chapter' && !book ? await statusHtml([m.id], m) : ''}${audioUrl ? audioPanel() : ''}${body}
     ${lv === 'chapter' ? `<h2>本课工具</h2><div class="grid2">
       <a class="btn" href="#/quiz/lesson:${m.id}">📝 测验</a><button class="btn" id="autoWords">🔎 自动选生词（离线词典）</button>${aiBtn('aiCards', '生成词卡')}
-      <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button><a class="btn" href="#/roots?m=${m.id}">🌳 本课词根网络</a></div>` : ''}`;
+      <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button><a class="btn" href="#/roots?m=${m.id}">🌳 本课词根网络</a><a class="btn" href="#/bilingual/${m.id}" id="toBi">📑 双语对照 / 导出</a></div>` : ''}`;
     bind(); markRoots(); markKnownWords();
     if (lv === 'word') wordChips();
   };
