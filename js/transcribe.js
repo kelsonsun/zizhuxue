@@ -220,7 +220,10 @@ export function segmentsToRows(segs, { pad = 0.15, pcm = null, sr = SR, maxWords
     const s = text.slice(toks[a].a, toks[c].b + 1); const t = tidySentence(s, zh);
     // 句子边界吸附到停顿：上一句到停顿开始，下一句从停顿结束
     const gl = a > 0 ? B[a - 1].gap : null, gr = c < B.length ? B[c].gap : null;
-    rows.push({ en: zh ? '' : t, zh: zh ? t : '', t0: gl ? Math.max(toks[a].t0 - 0.6, gl.b - 0.1) : toks[a].t0, t1: gr ? Math.min(toks[c].t1 + 0.6, gr.a + 0.1) : toks[c].t1 });
+    const row = { en: zh ? '' : t, zh: zh ? t : '', t0: gl ? Math.max(toks[a].t0 - 0.6, gl.b - 0.1) : toks[a].t0, t1: gr ? Math.min(toks[c].t1 + 0.6, gr.a + 0.1) : toks[c].t1 };
+    // v1.5.1：有逐词时间时随句保存（拆分时按词时间切）；补标点不改变词数
+    if (toks.slice(a, c + 1).every(k => k.exact)) row.wt = toks.slice(a, c + 1).map(k => [+k.t0.toFixed(2), +k.t1.toFixed(2)]);
+    rows.push(row);
     a = c + 1;
   }
   rows.forEach((r, i) => { r.t0 = +Math.max(0, r.t0 - pad, i ? rows[i - 1].t1 - 0.05 : 0).toFixed(2); const nx = rows[i + 1]; r.t1 = +(nx ? Math.min(r.t1 + 0.3, nx.t0 - pad) : r.t1 + 0.5).toFixed(2); if (r.t1 <= r.t0) r.t1 = +(r.t0 + 0.5).toFixed(2); });
