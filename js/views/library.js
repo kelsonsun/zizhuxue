@@ -5,6 +5,7 @@ import { deleteMaterials } from '../matdelete.js';
 import { $, $$, esc, fmtDate, toast, sheet, confirmDlg, hilite } from '../ui.js';
 import { isDue, isNew, dayNumber } from '../sm2.js';
 import { isMastered, restorePractice } from '../practice.js';
+import { mountRootBox } from '../rootbox.js';
 import { progressOf } from '../structure.js';
 
 const bookPct = chs => { let d = 0, t = 0; for (const c of chs) { const p = progressOf(c); d += p.done; t += p.total; } return t ? Math.round(100 * d / t) : 0; };
@@ -36,7 +37,7 @@ export async function render(root) {
     const vis = sortMats(shown, sortKey, { pct: pctOf, order: fullOrder });
     for (const id of [...picked]) if (!byId.has(id)) picked.delete(id);
     root.innerHTML = `
-    <header class="top"><h1>个人材料库</h1><span class="muted">${mats.filter(m => !m.bookId).length} 份材料/书 · ${cards.length} 张卡片</span></header>
+    <header class="top"><h1>个人材料库</h1><a class="btn" href="#/roots" id="toRoots">🌳 词根地图</a><span class="muted">${mats.filter(m => !m.bookId).length} 份材料/书 · ${cards.length} 张卡片</span></header>
     <div class="seg"><a href="#" data-tab="mat" class="${tab === 'mat' ? 'on' : ''}">材料</a><a href="#" data-tab="card" class="${tab === 'card' ? 'on' : ''}">生词本 / 卡片</a></div>
     <input id="q" type="search" placeholder="搜索${tab === 'mat' ? '标题、句子' : '词、释义、原句'}" value="${esc(q)}" aria-label="搜索">
     ${tab === 'mat' ? `
@@ -94,10 +95,12 @@ export async function render(root) {
       if (e.target.closest('[data-say]')) return tts.speak(c.type === 'sentence' ? c.term : c.term).catch(x => toast(x.message));
       const sh = sheet(`<h3>${esc(c.term)}</h3>
         <div class="field"><label for="ez">中文释义</label><textarea id="ez" rows="2">${esc(c.zh)}</textarea></div>
+        ${c.type !== 'sentence' && !/\s/.test(c.term.trim()) ? '<div id="eroot"></div>' : ''}
         <div class="field"><label for="ep">音标</label><input id="ep" value="${esc(c.phonetic || '')}"></div>
         <div class="field"><label for="en">备注</label><input id="en" value="${esc(c.note || '')}"></div>
         ${c.sentence?.en ? `<div class="muted small">原句：${hilite(c.sentence.en, c.term)}${c.sentence.zh ? '<br>' + esc(c.sentence.zh) : ''}</div>` : ''}
         <div class="row gap"><button class="btn danger" id="edel">删除</button><button class="btn primary grow" id="esave">保存</button></div>`, { cls: 'small' });
+      if ($('#eroot', sh.el)) mountRootBox($('#eroot', sh.el), c.term.trim(), { onSaved: () => draw() });
       $('#esave', sh.el).onclick = async () => { c.zh = $('#ez', sh.el).value.trim(); c.phonetic = $('#ep', sh.el).value.trim(); c.note = $('#en', sh.el).value.trim(); await db.cards.save(c); sh.close(); draw(); };
       $('#edel', sh.el).onclick = async () => { sh.close(); if (await confirmDlg('删除这张卡片？', { ok: '删除', danger: true })) { await db.cards.remove(c.id); draw(); } };
     });

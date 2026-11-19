@@ -11,6 +11,8 @@ import { onLeave } from '../app.js';
 import { $, $$, esc, toast } from '../ui.js';
 import { tokenize } from '../textproc.js';
 import { undoBar } from '../matdelete.js';
+import { mountRootBox, partsTiles } from '../rootbox.js';
+import * as R from '../roots.js';
 
 const dayLabel = d => d <= 0 ? '今天' : d === 1 ? '明天' : d + '天后';
 const pct = x => Math.round(x * 100) + '%';
@@ -67,6 +69,8 @@ export async function render(root, _a, params = {}) {
   const prompt = (x) => {
     const c = x.c;
     if (x.qt === 'listen') return `<div class="rv-q muted">${c.type === 'sentence' ? '听一句，把它说出来或写下来' : '听一听，把这个' + (CARD_TYPE[c.type] || '词') + '说出来或写下来'}</div><div class="row gap center"><button class="btn primary" id="say">🔊 播放</button><button class="btn" id="slow">🐢 慢速</button></div>`;
+    if (x.qt === 'parts') return `<div class="rv-q muted">拆解推测：看词根词缀，猜这个词的意思</div><div class="rv-en">${esc(c.term)}</div><div class="rbox rv-parts">${partsTiles(c.term)}</div>`;
+    if (x.qt === 'rootm') { const rq = x.rq || (x.rq = P.rootQuestion(c, 'rootm')); return `<div class="rv-q muted">词根配对：<b class="rv-root">${esc(rq.root.forms.join(' / '))}</b> 是什么意思？</div><div class="muted small">出自 ${esc(c.term)}</div>`; }
     if (x.qt === 'cloze') return `<div class="rv-q muted">原句填空：空里应该是什么？</div><div class="rv-sent">${mask(c.sentence.en, c.term)}</div>${c.sentence.zh ? `<div class="muted">${esc(c.sentence.zh)}</div>` : ''}<div class="muted small">提示：${esc(c.zh || '')}</div>`;
     return `<div class="rv-q muted">${c.type === 'sentence' ? '用英文说出/写出这句话' : '这个意思用英文怎么说？'}</div>${c.type !== 'sentence' && x.sense ? `<div class="rv-zh">${esc(S.briefText({ pos: x.sense.pos, zh: x.sense.zh }, 99))}</div>${S.parse(c.zh).length > 1 ? `<details class="allsense"><summary>展开全部释义</summary>${S.fullHtml(c.zh)}</details>` : ''}` : `<div class="rv-zh">${esc(c.zh)}</div>`}${c.type !== 'sentence' && c.sentence?.zh ? `<div class="muted small">语境：${esc(c.sentence.zh)}</div>` : ''}`;
   };
@@ -93,6 +97,7 @@ export async function render(root, _a, params = {}) {
     $('.choices', root).outerHTML = `<div class="chosen muted small">你选了：<b>${P.CHOICE_ZH[ch]}</b>${ch === 'fuzzy' ? '（对了 9 天后再练，错了 3 天后）' : '（对了 12 天后再练，错了 1 天后）'}</div>`;
     $('.chnote', root)?.remove();
     const c = st.x.c, h = P.hintText(c.term);
+    if (st.x.qt === 'parts' || st.x.qt === 'rootm') return mcBox(ch);
     $('#ansarea', root).innerHTML = `${ch === 'fuzzy' ? `<div class="hintbox" id="hintbox">💡 提示：<b class="hintl">${esc(h.letters)}</b>（${h.count} 个词）${st.x.qt !== 'zh2en' && c.zh ? `<div class="muted small">中文：${esc(c.zh)}</div>` : ''}</div>` : ''}
       <div class="seg ansmode" role="tablist"><a role="tab" data-mode="voice" class="${st.mode === 'voice' ? 'on' : ''}">🎙️ 说出来</a><a role="tab" data-mode="text" class="${st.mode === 'text' ? 'on' : ''}">⌨️ 写出来</a></div><div id="ansbox"></div>`;
     $$('[data-mode]', root).forEach(b => b.onclick = () => { st.mode = b.dataset.mode; saveSettings({ answerMode: st.mode }); $$('[data-mode]', root).forEach(y => y.classList.toggle('on', y === b)); ansBox(); });
@@ -101,6 +106,17 @@ export async function render(root, _a, params = {}) {
   }
   const choicesHtml = () => `<div class="choices" role="group" aria-label="先选：你会吗？">${P.CHOICES.map(([k, t]) => `<button class="btn ch ch-${k}" data-ch="${k}">${{ dunno: '🙈', fuzzy: '🤔', know: '🙂', master: '⭐' }[k]} ${t}</button>`).join('')}</div>
       <p class="muted small chnote">先选再答：<b>不会</b>直接看答案（明天再练）·<b>模糊</b>先给提示再答·<b>会</b>直接答·<b>熟练</b>以后不再出（可撤销）</p>`;
+  // v1.5 选择题（拆解推测 / 词根配对）：模糊先给提示；选完按同样的四按钮规则排下次复习
+  function mcBox(ch) {
+    const x = st.x, c = x.c; const rq = x.rq || (x.rq = P.rootQuestion(c, x.qt));
+    const hint = x.qt === 'parts' ? `构词逻辑：${esc(rq.e.logic)}` : `同根词：${R.family(rq.root.id).filter(e => e.w !== c.term.toLowerCase()).slice(0, 3).map(e => esc(e.w)).join('、')}`;
+    $('#ansarea', root).innerHTML = `${ch === 'fuzzy' ? `<div class="hintbox" id="hintbox">💡 ${hint}</div>` : ''}<div class="opts mcopts">${rq.options.map((o, i) => `<button class="btn opt" data-mo="${i}">${esc(o)}</button>`).join('')}</div>`;
+    $$('[data-mo]', root).forEach(b => b.onclick = () => {
+      const pick = rq.options[+b.dataset.mo], ok = pick === rq.answer; st.result = { score: ok ? 100 : 0, mode: 'choice', answer: pick }; scores.push(ok ? 100 : 0);
+      $$('[data-mo]', root).forEach(y => { y.disabled = true; y.classList.toggle('right', rq.options[+y.dataset.mo] === rq.answer); y.classList.toggle('bad', y === b && !ok); });
+      finalize(ok, `<div class="muted small">你选了：${esc(pick)}${ok ? '' : `；正确：<b>${esc(rq.answer)}</b>`}</div>`);
+    });
+  }
   function ansBox(a = asrStatus()) {
     const box = $('#ansbox', root); if (!box || st.result) return;
     if (st.mode === 'text') {
@@ -136,9 +152,11 @@ export async function render(root, _a, params = {}) {
     const vv = window.visualViewport; if (vv) { vv.addEventListener('resize', fit); onLeave(() => vv.removeEventListener('resize', fit)); }
     window.addEventListener('resize', fit); onLeave(() => window.removeEventListener('resize', fit));
   }
+  const rootable = c => c.type !== 'sentence' && /^[A-Za-z][A-Za-z'’-]+$/.test(String(c.term).trim());
+  const mountRv = () => { const el = $('#rvroot', root); if (el) mountRootBox(el, st.x.c.term.trim()); };
   const answerHtml = () => { const c = st.x.c; return `<div class="rv-ans"><div class="rv-en">${esc(c.term)} <button class="mini" id="hear" aria-label="听发音">🔊</button></div>${c.type !== 'sentence' && S.parse(c.zh).length > 1 ? `<div class="muted senses">${S.fullHtml(c.zh)}</div>` : `<div class="muted">${esc(c.zh || '')}</div>`}${c.sentence?.en && c.type !== 'sentence' ? `<div class="rv-sent small">${esc(c.sentence.en)}</div>` : ''}</div>`; };
-  const nextHtml = days => `<p class="muted small nextdue">下次复习：<b>${dayLabel(days)}</b></p><button class="btn primary big" id="next">下一题</button>`;
-  function bindNext(x) { $('#hear', root)?.addEventListener('click', () => speakRef()); $('#next', root).onclick = () => advance(x); $('#next', root).focus({ preventScroll: true }); $('#fb', root).scrollIntoView({ block: 'nearest' }); }
+  const nextHtml = days => `${rootable(st.x.c) ? '<div id="rvroot"></div>' : ''}<p class="muted small nextdue">下次复习：<b>${dayLabel(days)}</b></p><button class="btn primary big" id="next">下一题</button>`;
+  function bindNext(x) { mountRv(); $('#hear', root)?.addEventListener('click', () => speakRef()); $('#next', root).onclick = () => advance(x); $('#next', root).focus({ preventScroll: true }); $('#fb', root).scrollIntoView({ block: 'nearest' }); }
   // 不会：马上给出答案（原句/释义/🔊），1 天后再练；本轮不再出
   async function giveUp() {
     const x = st.x; st.result = { score: null, mode: 'gaveup' }; tally.dunno++;

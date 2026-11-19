@@ -7,6 +7,7 @@ import * as dict from '../dict.js';
 import { parseBilingual } from '../textproc.js';
 import { settings, saveSettings, session, aiBtn, makeCard, CARD_TYPE } from '../state.js';
 import { $, $$, esc, go, toast, sheet, confirmDlg, wordsHtml, tokensOf } from '../ui.js';
+import { familyTag } from '../roots.js';
 import { onLeave } from '../app.js';
 import { paragraphs, paraIndexOf, progressOf, markDone, touchLast, isBook } from '../structure.js';
 import { openWordSheet, openPractice, toggleStar } from '../tools.js';
@@ -106,8 +107,8 @@ export async function render(root, [id], params = {}) {
     ${levelBar()}${lv === 'chapter' && !book ? await statusHtml([m.id], m) : ''}${audioUrl ? audioPanel() : ''}${body}
     ${lv === 'chapter' ? `<h2>本课工具</h2><div class="grid2">
       <a class="btn" href="#/quiz/lesson:${m.id}">📝 测验</a><button class="btn" id="autoWords">🔎 自动选生词（离线词典）</button>${aiBtn('aiCards', '生成词卡')}
-      <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button></div>` : ''}`;
-    bind();
+      <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button><a class="btn" href="#/roots?m=${m.id}">🌳 本课词根网络</a></div>` : ''}`;
+    bind(); markRoots();
     if (lv === 'word') wordChips();
   };
 
@@ -162,12 +163,14 @@ export async function render(root, [id], params = {}) {
   const stopAll = () => { st.tok++; tts.cancel(); au?.pause(); root.classList.remove('playing'); $$('.sent', root).forEach(e => e.classList.remove('active')); };
   const toggleBtn = (id, key, label) => $(id, root)?.addEventListener('click', e => { st[key] = !st[key]; e.currentTarget.classList.toggle('on', st[key]); e.currentTarget.setAttribute('aria-pressed', st[key]); toast(`${label}：${st[key] ? '开' : '关'}${st[key] ? '（点“停止”结束）' : ''}`); });
 
+  // v1.5：属于内置词根家族的词，加一条细虚线（点词时下方自动给出拆解和家族）
+  const markRoots = () => $$('.w[data-w]', root).forEach(el => { const r = familyTag(el.textContent); if (r) { el.classList.add('rw'); el.dataset.root = r; } });
   const wordChips = async () => {
     const s = m.sentences[si]; const toks = tokensOf(s.en || ''); const seen = new Set(); const items = [];
     for (let k = 0; k < toks.length; k++) { const w = toks[k].toLowerCase(); if (seen.has(w) || w.length < 2) continue; seen.add(w); const d = await dict.lookup(w).catch(() => null); items.push({ w: toks[k], k, rank: d?.rank ?? 99999, d }); }
     const hard = items.filter(x => x.rank > 300 || !x.d); const list = hard.length ? hard : items;
     const box = $('#wchips', root); if (!box) return;
-    box.innerHTML = list.map(x => `<button class="chip wchip" data-k="${x.k}">${esc(x.w)}${x.d ? `<small>${esc(S.brief(x.d.senses.find(y => S.posKey(y.pos) !== 'dom') || x.d.senses[0], 2).text)}</small>` : ''}</button>`).join('') + `<button class="chip" id="allw">${hard.length ? '显示全部词' : ''}</button>`;
+    box.innerHTML = list.map(x => `<button class="chip wchip${familyTag(x.w) ? ' rw' : ''}" data-k="${x.k}">${familyTag(x.w) ? '🌳' : ''}${esc(x.w)}${x.d ? `<small>${esc(S.brief(x.d.senses.find(y => S.posKey(y.pos) !== 'dom') || x.d.senses[0], 2).text)}</small>` : ''}</button>`).join('') + `<button class="chip" id="allw">${hard.length ? '显示全部词' : ''}</button>`;
     $$('.wchip', box).forEach(b => b.onclick = () => openWordSheet(ctx, s, +b.dataset.k));
     $('#allw', box).onclick = () => { box.innerHTML = items.map(x => `<button class="chip wchip" data-k="${x.k}">${esc(x.w)}</button>`).join(''); $$('.wchip', box).forEach(b => b.onclick = () => openWordSheet(ctx, s, +b.dataset.k)); };
   };
