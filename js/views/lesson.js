@@ -8,6 +8,7 @@ import { parseBilingual } from '../textproc.js';
 import { settings, saveSettings, session, aiBtn, makeCard, CARD_TYPE } from '../state.js';
 import { $, $$, esc, go, toast, sheet, confirmDlg, wordsHtml, tokensOf } from '../ui.js';
 import { familyTag } from '../roots.js';
+import * as V from '../vocab.js';
 import { onLeave } from '../app.js';
 import { paragraphs, paraIndexOf, progressOf, markDone, touchLast, isBook } from '../structure.js';
 import { openWordSheet, openPractice, toggleStar } from '../tools.js';
@@ -60,7 +61,9 @@ export async function render(root, [id], params = {}) {
         ${lv !== 'sent' && lv !== 'word' ? `<button class="btn tog ${st.loopOne ? 'on' : ''}" id="loopOne" aria-pressed="${st.loopOne}">🔂 单句循环</button>` : ''}
         <button class="btn tog ${st.loopAll ? 'on' : ''}" id="loopAll" aria-pressed="${st.loopAll}">${lv === 'sent' || lv === 'word' ? '🔂 单句循环' : loopLabel}</button>
         <button class="btn tog ${st.showZh ? 'on' : ''}" id="showZh" aria-pressed="${st.showZh}">中文</button>
+        <button class="btn tog ${settings.hlKnown !== false ? 'on' : ''}" id="hlKnown" aria-pressed="${settings.hlKnown !== false}" title="生词本里的词再次出现时标出来">学过的词</button>
       </div>
+      <div class="muted small kwinfo" id="kwInfo" role="status"></div>
       <div class="rates" role="group" aria-label="语速">语速 ${[0.6, 0.8, 1, 1.2].map(r => `<button class="chip ${st.rate === r ? 'on' : ''}" data-rate="${r}">${r}×</button>`).join('')}
         ${hasSeg() ? `<button class="chip ${st.orig ? 'on' : ''}" id="orig">${st.orig ? '原录音' : '合成语音'}</button>` : ''}</div>
     </section>`;
@@ -108,7 +111,7 @@ export async function render(root, [id], params = {}) {
     ${lv === 'chapter' ? `<h2>本课工具</h2><div class="grid2">
       <a class="btn" href="#/quiz/lesson:${m.id}">📝 测验</a><button class="btn" id="autoWords">🔎 自动选生词（离线词典）</button>${aiBtn('aiCards', '生成词卡')}
       <button class="btn" id="editSents">✏️ 编辑句子</button><button class="btn" id="info">🏷 名称 / 标签 / 删除</button><a class="btn" href="#/roots?m=${m.id}">🌳 本课词根网络</a></div>` : ''}`;
-    bind(); markRoots();
+    bind(); markRoots(); markKnownWords();
     if (lv === 'word') wordChips();
   };
 
@@ -165,6 +168,21 @@ export async function render(root, [id], params = {}) {
 
   // v1.5：属于内置词根家族的词，加一条细虚线（点词时下方自动给出拆解和家族）
   const markRoots = () => $$('.w[data-w]', root).forEach(el => { const r = familyTag(el.textContent); if (r) { el.classList.add('rw'); el.dataset.root = r; } });
+  // v1.7：学过的生词（生词本里的词 / 短语，按原形匹配）再次出现时高亮；在收藏它的那句以外出现的加深
+  const markKnownWords = async () => {
+    $$('.w.kw', root).forEach(el => { el.classList.remove('kw', 'again'); el.removeAttribute('data-kw'); el.removeAttribute('title'); });
+    const info = $('#kwInfo', root); if (settings.hlKnown === false) { if (info) info.textContent = ''; return; }
+    await dict.ready().catch(() => { }); const idx = V.knownIndex(await db.cards.all(), dict.lemmaSync); if (!idx.size) { if (info) info.textContent = ''; return; }
+    let n = 0, again = 0;
+    for (const en of $$('.sent .en', root)) {
+      const sentEl = en.closest('.sent'); const s = m.sentences[+sentEl?.dataset.i]; const sp = $$('.w[data-w]', en);
+      for (const h of V.markKnown(sp.map(x => x.textContent), idx, dict.lemmaSync)) {
+        const ag = h.card.sentenceId !== s?.id; n++; if (ag) again++;
+        for (let j = h.k; j < h.k + h.len; j++) { const el = sp[j]; el.classList.add('kw'); if (ag) el.classList.add('again'); el.dataset.kw = h.card.term; el.title = `生词本：${h.card.term}${h.card.zh ? ' — ' + S.briefAll(h.card.zh).text : ''}`; }
+      }
+    }
+    if (info) info.textContent = n ? `学过的生词在这里出现 ${n} 处（绿色底纹）${again ? `，其中 ${again} 处是在别的句子里再次遇到（加深）` : ''}` : '';
+  };
   const wordChips = async () => {
     const s = m.sentences[si]; const toks = tokensOf(s.en || ''); const seen = new Set(); const items = [];
     for (let k = 0; k < toks.length; k++) { const w = toks[k].toLowerCase(); if (seen.has(w) || w.length < 2) continue; seen.add(w); const d = await dict.lookup(w).catch(() => null); items.push({ w: toks[k], k, rank: d?.rank ?? 99999, d }); }
@@ -181,6 +199,7 @@ export async function render(root, [id], params = {}) {
     $('#playAll', root)?.addEventListener('click', () => run(lv === 'chapter' || lv === 'para' ? range[0] : si, lv === 'chapter' || lv === 'para'));
     $('#stop', root)?.addEventListener('click', stopAll);
     toggleBtn('#loopOne', 'loopOne', '单句循环'); toggleBtn('#loopAll', 'loopAll', lv === 'sent' || lv === 'word' ? '单句循环' : '范围循环');
+    $('#hlKnown', root)?.addEventListener('click', e => { const on = settings.hlKnown === false; saveSettings({ hlKnown: on }); e.currentTarget.classList.toggle('on', on); e.currentTarget.setAttribute('aria-pressed', on); markKnownWords(); });
     $('#showZh', root)?.addEventListener('click', e => { st.showZh = !st.showZh; saveSettings({ showZh: st.showZh }); e.currentTarget.classList.toggle('on', st.showZh); $$('.zh', root).forEach(z => z.classList.toggle('hide', !st.showZh)); });
     $$('[data-rate]', root).forEach(b => b.onclick = () => { st.rate = +b.dataset.rate; saveSettings({ rate: st.rate }); $$('[data-rate]', root).forEach(x => x.classList.toggle('on', x === b)); });
     $('#orig', root)?.addEventListener('click', e => { st.orig = !st.orig; e.currentTarget.textContent = st.orig ? '原录音' : '合成语音'; e.currentTarget.classList.toggle('on', st.orig); });
@@ -200,12 +219,13 @@ export async function render(root, [id], params = {}) {
     $('#sentDone', root)?.addEventListener('click', async () => {
       const s = m.sentences[si]; const done = !!m.progress?.done?.[s.id];
       if (done) { delete m.progress.done[s.id]; await db.materials.save(m); return draw(); }
-      await markDone(m, [s.id], { lv: 'sent', si: Math.min(si + 1, N - 1) }); toast('已记录进度'); go(si < N - 1 ? url('sent', si + 1) : url('sent', si));
+      await markDone(m, [s.id], { lv: 'sent', si: Math.min(si + 1, N - 1) }); toast('已记录进度'); import('../progress.js').then(P => P.grant({ kind: 'sent', key: 'sent:' + s.id, label: '学完一句' })).catch(() => { }); go(si < N - 1 ? url('sent', si + 1) : url('sent', si));
     });
     $('#paraDone', root)?.addEventListener('click', async () => {
       const ids = m.sentences.slice(grp.start, grp.end + 1).map(s => s.id); const all = ids.every(x => m.progress?.done?.[x]);
       if (all) { ids.forEach(x => delete m.progress.done[x]); await db.materials.save(m); return draw(); }
-      await markDone(m, ids, { lv: 'para', si: groups[Math.min(pi + 1, groups.length - 1)].start }); toast('本段已学完'); go(pi < groups.length - 1 ? url('para', groups[pi + 1].start) : url('para', grp.start));
+      await markDone(m, ids, { lv: 'para', si: groups[Math.min(pi + 1, groups.length - 1)].start }); toast('本段已学完');
+      import('../celebrate.js').then(C => C.sessionDone({ kind: 'unit', key: `unit:${m.id}:${m.sentences[grp.start].id}`, title: '本段学完了！', lines: [`《${m.title}》第 ${pi + 1} 段`, `${ids.length} 句`] })).catch(e => console.warn(e)); go(pi < groups.length - 1 ? url('para', groups[pi + 1].start) : url('para', grp.start));
     });
     // 录音播放器
     const a = $('#au', root);

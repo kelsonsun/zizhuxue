@@ -5,6 +5,7 @@ import { SYNC_AVAILABLE } from '../deploy.js';
 import { sheet } from '../ui.js';
 import { settings, saveSettings, seedIfFirstRun, sampleMaterial } from '../state.js';
 import { $, esc, toast, confirmDlg, download, go } from '../ui.js';
+import * as OFF from '../offmode.js';
 import * as tour from '../tour.js';
 import * as inst from '../install.js';
 import { APP_VERSION } from '../version.js';
@@ -15,6 +16,9 @@ import * as tts from '../tts.js';
 
 const OFFLINE_ASSETS = ['vendor/tesseract/tesseract.min.js', 'vendor/tesseract/worker.min.js', 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js', 'vendor/tesseract/core/tesseract-core-lstm.wasm.js', 'vendor/tesseract/lang/eng.traineddata.gz', 'vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/mammoth/mammoth.browser.min.js'];
 
+/** v1.7：说明类文字一律可折叠（默认收起，只显示标题；点标题展开 / 收起） */
+const help = (title, html, id = '') => `<details class="help"${id ? ` id="${id}"` : ''}><summary>${title}</summary><div class="helpb">${html}</div></details>`;
+
 export async function render(root) {
   const c = ai.getConfig() || { baseUrl: '', apiKey: '', model: '' };
   root.innerHTML = `
@@ -22,7 +26,7 @@ export async function render(root) {
   <section class="card fbcard" id="fbCard"><h2>反馈与建议</h2><div id="fbBox"></div></section>
 
   <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${ai.isConfigured() ? '已配置' : '未配置'}</span></h2>
-    <p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>
+    ${help('说明：AI 接口怎么填、密钥存在哪', `<p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>`, 'hAi')}
     <div class="field"><label for="ab">接口地址</label><input id="ab" value="${esc(c.baseUrl || ai.DEFAULT_BASE)}" placeholder="https://api.openai.com/v1" inputmode="url" autocapitalize="off" autocomplete="off"></div>
     <div class="field"><label for="ak">密钥（API Key）</label><input id="ak" type="password" value="${esc(c.apiKey)}" placeholder="sk-…" autocomplete="off"></div>
     <div class="field"><label for="am">模型</label><input id="am" value="${esc(c.model || ai.DEFAULT_MODEL)}" placeholder="例如 gpt-4o-mini" autocapitalize="off" autocomplete="off"></div>
@@ -34,6 +38,10 @@ export async function render(root) {
     <label class="check"><input type="checkbox" id="asr" ${settings.useAsr ? 'checked' : ''}> 跟读和复习「说出来」时用浏览器语音识别转文字判分（关掉则只录音回放 + 自评）</label>
     <p class="muted small" id="asrinfo">语音识别：${!sp.asrSupported() ? '这个浏览器没有。' : isIosStandalone() ? 'iPhone 主屏应用里苹果不提供（即使接口存在也不工作），已自动改为录音回放 + 自评。用 Safari 浏览器打开本站则可用（需开启 Siri，语音交给苹果服务器识别）。' : '可用（由浏览器厂商的服务识别，仅供参考）。'}</p>
     ${isIosStandalone() && sp.asrSupported() ? `<label class="check"><input type="checkbox" id="fasr" ${settings.forceAsr ? 'checked' : ''}> 在主屏应用里也尝试语音识别（若无反应会自动改为自评）</label>` : ''}
+    <div class="field"><label for="dgoal">每日目标（打卡）</label><select id="dgoal">${[5, 10, 20, 30].map(n => `<option ${(settings.dailyGoal || 10) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <label class="check"><input type="checkbox" id="hlk" ${settings.hlKnown !== false ? 'checked' : ''}> 课文里自动高亮学过的生词（生词本里的词再次出现时标出来）</label>
+    <label class="check"><input type="checkbox" id="sfxTog" ${settings.sfx !== false ? 'checked' : ''}> 庆祝音效（做完一组、打卡里程碑时播放）</label>
+    <div class="row gap wrap"><a class="btn" href="#/achieve" id="meAch">🏆 成就</a><a class="btn" href="#/vocab" id="meVocab">📊 词汇量统计</a><button class="btn" id="qkHistMe">🔎 查词翻译历史</button></div>
     <button class="btn" id="tourAgain">🧭 重新观看新手引导</button></section>
 
   <section class="card" id="voiceCard"><h2>英语朗读声音</h2>
@@ -43,17 +51,17 @@ export async function render(root) {
       <label class="check ${ai.isConfigured() ? '' : 'off'}"><input type="radio" name="veng" value="ai" ${settings.ttsEngine === 'ai' ? 'checked' : ''} ${ai.isConfigured() ? '' : 'disabled'}> AI 自然语音${ai.isConfigured() ? '（用上面配置的接口 /audio/speech，按你的服务计费；生成过的句子缓存在本机，不重复收费）' : '（需先在上面配置 AI 密钥）'}</label></div>
     <div id="vsys"></div><div id="vai"></div>
     <div class="row gap wrap"><button class="btn primary" id="vtry">🔊 试听</button></div><div class="muted small" id="vmsg" role="status"></div>
-    <p class="muted small">iPhone 想要更自然的系统声音：打开「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」，选一个口音，下载带“增强”或“高级”字样的声音（如 Ava、Zoe、Evan），下载完回到这里刷新，在「声音」里选它。</p></section>
+    ${help('说明：iPhone 怎么换更自然的声音', `<p class="muted small">iPhone 想要更自然的系统声音：打开「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」，选一个口音，下载带“增强”或“高级”字样的声音（如 Ava、Zoe、Evan），下载完回到这里刷新，在「声音」里选它。</p>`, 'hVoice')}</section>
 
   <section class="card"><h2>翻译（给纯英文/纯中文材料配对照）</h2>
-    <p class="muted small">导入纯英文或纯中文的文件后，可以一键配上翻译。三种真实通道，按需选择：</p>
+    ${help('说明：三种翻译通道（AI / 浏览器内置 / MyMemory）', `<p class="muted small">导入纯英文或纯中文的文件后，可以一键配上翻译。三种真实通道，按需选择：</p>
     <ul class="small"><li><b>AI</b>：用上面配置的接口，质量最好；${ai.isConfigured() ? '已配置。' : '<b>未配置</b>。'}</li>
       <li><b>浏览器内置翻译</b>：电脑版 Chrome 138+ / Edge 148+ 在本机翻译、不上传；iPhone 上的所有浏览器都没有。当前浏览器：<span id="csnow">检测中…</span></li>
-      <li><b>MyMemory 公共翻译</b>：免费、免注册、iPhone 可用；内容会发给第三方 MyMemory（Translated 公司），每次使用前会让你确认。匿名约 5000 字符/天，填一个邮箱可到约 50000 字符/天（邮箱会随请求发给 MyMemory，不是注册）。</li></ul>
+      <li><b>MyMemory 公共翻译</b>：免费、免注册、iPhone 可用；内容会发给第三方 MyMemory（Translated 公司），每次使用前会让你确认。匿名约 5000 字符/天，填一个邮箱可到约 50000 字符/天（邮箱会随请求发给 MyMemory，不是注册）。</li></ul>`, 'hTr')}
     <div class="field"><label for="mme">MyMemory 联系邮箱（可选）</label><input id="mme" type="email" value="${esc(settings.mmEmail || '')}" placeholder="不填则匿名使用" autocomplete="email"></div></section>
 
   <section class="card"><h2>数据与备份</h2>
-    <p class="muted small">所有材料、卡片和复习进度都保存在本设备。备份文件是 JSON（不含 AI 密钥和录音），可用来换设备或防丢。</p>
+    ${help('说明：数据存在哪、备份文件里有什么', '<p class="muted small">所有材料、卡片和复习进度都保存在本设备。备份文件是 JSON（不含 AI 密钥和录音），可用来换设备或防丢。</p>', 'hData')}
     <div class="row gap wrap"><button class="btn" id="exp">导出 JSON 备份</button><label class="btn">导入备份（合并）<input type="file" id="imp" accept=".json,application/json" hidden></label><label class="btn">导入备份（覆盖）<input type="file" id="impr" accept=".json,application/json" hidden></label></div>
     <div class="row gap wrap"><button class="btn" id="sample">恢复示例材料</button><button class="btn danger" id="wipe">清空所有数据</button></div>
     <div class="muted small">存储方式：${db.storageMode === 'indexeddb' ? 'IndexedDB（本地）' : '内存（浏览器禁用了本地存储，关闭即丢失）'}</div></section>
@@ -61,22 +69,26 @@ export async function render(root) {
   <section class="card" id="syncCard"><h2>云同步 <span class="tag" id="sytag">…</span></h2><div id="sybody"></div></section>
 
   ${inst.isNative() ? '' : `<section class="card" id="installCard"><h2>装到主屏 / 电脑桌面</h2>
-    <p class="small instst" id="instHow">${esc(inst.howText())}</p>
+    ${inst.inAppName() || inst.isStandalone() ? `<p class="small instst" id="instHow">${esc(inst.howText())}</p>` : help('说明：怎么装到主屏 / 桌面', `<p class="small instst" id="instHow">${esc(inst.howText())}</p>`, 'hInst')}
     ${inst.canPrompt() ? '<button class="btn primary" id="doInstall2">一键安装</button>' : ''}
     ${!inst.isStandalone() && inst.inAppName() ? '<button class="btn" id="copyLink2">复制链接</button>' : ''}</section>`}
 
-  <section class="card"><h2>离线使用</h2>
-    <p class="muted small">界面、离线词典，以及 PDF / Word 组件（约 1.8MB），联网打开过一次后就会自动缓存，断网也能用。截图识别组件约 11MB，为省流量不自动下载：第一次用截图识别时会下载，或点下面按钮提前缓存。缓存的组件在应用更新后仍保留。</p>
+  <section class="card" id="offCard"><h2>离线使用</h2>
+    ${'serviceWorker' in navigator && !inst.isNative() ? `<label class="check switch"><input type="checkbox" id="offTog" ${OFF.offlineOn() ? 'checked' : ''}> <b>离线使用</b>（默认打开）</label>
+    <p class="muted small" id="offExp">${OFF.offlineOn() ? '已打开：断网也能用。' : '已关闭：每次从网上加载最新版，没网时打不开。'}</p>
+    ${help('说明：离线使用开 / 关有什么区别', '<p class="muted small">打开：整个软件（界面、代码、离线词典）缓存在本机，断网也能用；有新版本时自动更新。</p><p class="muted small">关闭：每次打开都从网上加载最新版，不在本机缓存软件代码，PDF / Word / 截图识别组件也会删掉；没网时打不开，会显示提示页。</p><p class="muted small">两种模式下，你的材料、生词卡、复习记录都不受影响；本机转写的 Whisper 模型也保留。切换后要重新打开才生效。</p>', 'hOff')}` : ''}
+    <div id="offBody" ${OFF.offlineOn() ? '' : 'hidden'}>${help('说明：哪些组件会缓存', '<p class="muted small">界面、离线词典，以及 PDF / Word 组件（约 1.8MB），联网打开过一次后就会自动缓存，断网也能用。截图识别组件约 11MB，为省流量不自动下载：第一次用截图识别时会下载，或点下面按钮提前缓存。缓存的组件在应用更新后仍保留。</p>', 'hOffParts')}
     <div class="muted small" id="offst">离线状态：检测中…</div>
-    <button class="btn" id="pre">预缓存识别组件</button><div class="muted small" id="premsg" role="status"></div></section>
+    <button class="btn" id="pre">预缓存识别组件</button><div class="muted small" id="premsg" role="status"></div></div>
+    <div class="muted small" id="offmsg" role="status"></div></section>
 
-  <section class="card"><h2>隐私</h2><ul class="small">
+  <section class="card" id="privCard"><details class="help sec" id="hPriv"><summary><h2>隐私</h2></summary><ul class="small">
     <li>不绑定云同步时，内容只存在本机浏览器，没有账号、不联网。绑定后，材料、生词卡和复习记录会存到你填的同步服务器（AI 密钥和录音不会上传）。</li>
     <li>只有你点「AI」按钮时，相关句子才会发到你配置的 AI 服务。</li>
     <li>只有你确认使用「MyMemory 公共翻译」时，要翻译的句子才会发给 MyMemory。</li>
-    <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></section>
+    <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></details></section>
 
-  <section class="card"><h2>关于</h2><p class="muted small">自主学 v${APP_VERSION}（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
+  <section class="card" id="aboutCard"><details class="help sec" id="hAbout"><summary><h2>关于</h2></summary><p class="muted small">自主学 v${APP_VERSION}（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></details></section>`;
   { const FU = await import('../feedbackui.js'); FU.mountHistory($('#fbBox', root)); $('#fbTop', root).onclick = () => FU.openFeedback({}, { onClose: () => FU.mountHistory($('#fbBox', root)) }); }
   const E = id => $(id, root);
   renderSync(root);
@@ -123,6 +135,10 @@ export async function render(root) {
     catch (e) { m.textContent = '✗ ' + e.message; }
   };
   E('#nl').onchange = e => saveSettings({ newLimit: +e.target.value });
+  E('#dgoal').onchange = e => saveSettings({ dailyGoal: +e.target.value });
+  E('#hlk').onchange = e => saveSettings({ hlKnown: e.target.checked });
+  E('#sfxTog').onchange = e => saveSettings({ sfx: e.target.checked });
+  E('#qkHistMe').onclick = async () => (await import('./quickbox.js')).openHistory({ onPick: r => toast(`「${r.q}」：${r.word ? r.word.zh.split(' | ')[0] : r.tr || (r.rev || []).map(x => x.w).join(', ')}`, 5000) });
   E('#fasr')?.addEventListener('change', e => saveSettings({ forceAsr: e.target.checked }));
   E('#tourAgain').onclick = () => tour.start();
   E('#doInstall2')?.addEventListener('click', async () => { if (await inst.prompt()) toast('已安装，以后从主屏幕/桌面打开即可'); E('#doInstall2')?.remove(); E('#instHow').textContent = inst.howText(); });
@@ -152,6 +168,19 @@ export async function render(root) {
     const el = E('#offst'); if (el) el.textContent = `离线状态：界面与词典 ✓ · PDF ${pdf ? '✓' : '未缓存'} · Word ${word ? '✓' : '未缓存'} · 截图识别 ${ocr ? '✓' : '未缓存'}`;
   };
   offStatus();
+  E('#offTog')?.addEventListener('change', async e => {
+    const on = e.target.checked, m = E('#offmsg'); e.target.disabled = true;
+    if (!on && !(await confirmDlg('关闭离线使用？关闭后每次打开都从网上加载最新版，没网时打不开；会删掉本机缓存的软件代码和 PDF / Word / 截图识别组件。你的材料、生词卡和复习记录不受影响。', { ok: '关闭离线使用' }))) { e.target.checked = true; e.target.disabled = false; return; }
+    m.textContent = on ? '正在下载整个软件到本机…' : '正在切换为联网模式…';
+    try {
+      await OFF.setOffline(on);
+      m.textContent = on ? '✓ 已打开离线使用。' : '✓ 已关闭离线使用。';
+      E('#offExp').textContent = on ? '已打开：断网也能用（重新打开后生效）。' : '已关闭：每次从网上加载最新版（重新打开后生效）。'; E('#offBody').hidden = !on; if (on) offStatus();
+      const sh = sheet(`<h3>${on ? '已打开离线使用' : '已关闭离线使用'}</h3><p>${on ? '整个软件已缓存到本机，断网也能用。' : '以后每次都从网上加载最新版；没网时会显示提示页。'}你的材料和卡片都没有变。</p><p><b>请重新打开「自主学」让设置生效</b>（关掉再打开，或点下面的按钮）。</p><button class="btn primary" id="reopen">现在重新打开</button>`);
+      $('#reopen', sh.el).onclick = () => location.reload();
+    } catch (err) { e.target.checked = !on; m.textContent = `切换失败（${err.message}），设置没有改变。${on ? '打开离线使用需要联网下载整个软件。' : '需要联网才能切换。'}`; }
+    finally { e.target.disabled = false; }
+  });
   E('#pre').onclick = async () => {
     const m = E('#premsg'); let n = 0; m.textContent = '下载中…';
     try { for (const a of OFFLINE_ASSETS) { const r = await fetch(a); if (!r.ok) throw new Error(a); await r.arrayBuffer(); m.textContent = `已缓存 ${++n}/${OFFLINE_ASSETS.length}`; } m.textContent = '✓ 全部缓存完成，可离线使用识别、PDF、Word。'; offStatus(); }
@@ -170,20 +199,20 @@ async function renderSync(root) {
   if (!bound && !syncAvailable(cfg)) {
     // 没有可用的同步服务器（如 GitHub Pages 静态部署、原生客户端未配置）：显示“未开通”，不放会报错的按钮
     tag.textContent = '未开通'; tag.classList.remove('okt');
-    body.innerHTML = `<p class="muted small">这个版本还没有开通云同步服务，数据只保存在这台设备上，不登录也能一直正常使用。需要换设备时，可以用上面「数据与备份」里的导出，再在新设备上导入。</p>
+    body.innerHTML = `<p class="muted small">还没有开通云同步：数据只保存在这台设备上。</p>${help('说明：换设备怎么办', '<p class="muted small">这个版本还没有开通云同步服务，数据只保存在这台设备上，不登录也能一直正常使用。需要换设备时，可以用上面「数据与备份」里的导出，再在新设备上导入。</p>', 'hSync')}
       <details class="allsense"><summary>我有自己搭建的同步服务器</summary><p class="muted small">填写你自己的「自主学」同步服务器地址后才能绑定；地址不对会直接提示，不会改动本机数据。</p><button class="btn" id="syOwn">填写服务器地址</button></details>`;
     $('#syOwn', body).onclick = () => bindSheet(root, { own: true });
     return;
   }
   if (!bound) {
-    body.innerHTML = `<p class="muted small">${st.state === 'expired' ? '<b class="warn">' + esc(st.msg) + '</b><br>' : ''}现在所有数据只在这台设备上，不登录也能一直用。想让手机和电脑的材料、生词卡、复习进度保持一致时，再绑定（只需一次，之后长期保持登录、自动同步）。</p>
+    body.innerHTML = `<p class="muted small">${st.state === 'expired' ? '<b class="warn">' + esc(st.msg) + '</b><br>' : ''}不登录也能一直用。</p>${help('说明：什么时候需要绑定', '<p class="muted small">现在所有数据只在这台设备上，不登录也能一直用。想让手机和电脑的材料、生词卡、复习进度保持一致时，再绑定（只需一次，之后长期保持登录、自动同步）。</p>', 'hSync')}
       <button class="btn primary" id="syBind">☁️ 绑定/同步</button>`;
     $('#syBind', body).onclick = () => bindSheet(root);
     return;
   }
   body.innerHTML = `<p class="small">账号：<b>${esc(cfg.email || '（配对加入）')}</b><br><span class="muted">上次同步：<span id="syLast">${fmtT(st.lastSync || cfg.lastSync)}</span> · 待上传 <span id="syPend">${st.pending || 0}</span> 条</span><br><span class="muted" id="syMsg" role="status">${esc(st.msg || '')}</span></p>
     <div class="row gap wrap"><button class="btn primary" id="syNow">立即同步</button><button class="btn" id="syPair">📱 添加另一台设备</button><button class="btn" id="syOff">解除绑定</button></div>
-    <p class="muted small">同步服务器：${esc(cfg.url)}。会自动在后台同步（打开时、联网时、改动后）；离线时的改动先存本机，联网后自动补传。</p>`;
+    ${help('说明：同步服务器、什么时候同步', `<p class="muted small">同步服务器：${esc(cfg.url)}。会自动在后台同步（打开时、联网时、改动后）；离线时的改动先存本机，联网后自动补传。</p>`, 'hSync')}`;
   $('#syNow', body).onclick = async () => { $('#syMsg', body).textContent = '同步中…'; try { const r = await cloud.syncNow(); toast(`已同步（下载 ${r?.pulled || 0} 条，上传 ${r?.pushed || 0} 条）`); } catch (e) { toast(cloud.status.msg || e.message, 4000); } renderSync(root); };
   $('#syPair', body).onclick = () => pairSheet();
   $('#syOff', body).onclick = async () => { if (await confirmDlg('解除绑定后，这台设备不再同步；本机的数据都保留，云端数据也保留。确定吗？', { ok: '解除绑定' })) { await cloud.unbind(); toast('已解除绑定'); renderSync(root); } };

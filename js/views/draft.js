@@ -187,6 +187,7 @@ export async function render(root) {
     if (d.audioId) m.audioId = d.audioId;
     if (d.pauses) m.pauses = d.pauses;
     await db.materials.save(m);
+    if (!d.editId) import('../progress.js').then(P => P.grant({ kind: 'import', key: 'import:' + m.id, label: '导入材料「' + m.title + '」' })).catch(() => { }); // v1.7：导入新材料给星星钻石（每份一次、每天最多 3 份）
     session.draft = null; toast('已保存'); go('#/lesson/' + m.id);
     if (translate) setTimeout(() => openTranslate({ ids: [m.id], title: m.title, onDone: () => { if (location.hash.startsWith('#/lesson/' + m.id)) window.dispatchEvent(new HashChangeEvent('hashchange')); } }), 300);
   };

@@ -173,6 +173,7 @@ export async function render(root, [scope = 'all'], params) {
         ${wrong.length ? `<h2>需要再练的</h2><div class="list">${wrong.map(r => `<div class="item"><b>${esc(r.q.s?.en || r.q.c.term)}${r.choice ? ` <span class="tag">${P.CHOICE_ZH[r.choice]}</span>` : ''}</b><span class="muted">${esc(r.q.s?.zh || (r.q.sense ? S.briefText(r.q.sense, 6) : shortZh(r.q.c.zh)))}</span></div>`).join('')}</div><p class="muted small">这些都已自动加入复习：不会/会但答错 → 明天，模糊答错 → 3 天后。</p>` : '<p class="muted">全部答对，漂亮！</p>'}
         <div class="row gap"><button class="btn" id="again">再来一轮</button><a class="btn" href="#/">首页</a></div>`;
       $('#again', root).onclick = () => start(mode);
+      import('../celebrate.js').then(C => C.sessionDone({ key: 'quiz:' + Date.now(), title: '测验完成！', n: first.length, ok: first.length - wrong.length, avg, lines: [`不会 ${nGave} · 模糊 ${cnt('fuzzy')} · 会 ${cnt('know')}`] })).catch(e => console.warn(e));
     }
     ask();
   }
@@ -202,6 +203,7 @@ export async function render(root, [scope = 'all'], params) {
       ${wrong.length ? `<h2>需要再练的</h2><div class="list">${wrong.map(r => `<div class="item"><b>${esc(r.it.en)} <span class="tag">${P.CHOICE_ZH[r.choice]}</span></b><span class="muted">${esc(r.it.zh)}</span></div>`).join('')}</div><p class="muted small">这些都已自动加入复习：不会/会但答错 → 明天，模糊答错 → 3 天后${res.some(r => r.it.kind === 'passage') ? '（篇章题只记成绩，不单独排复习）' : ''}。</p>` : '<p class="muted">全部答对，漂亮！</p>'}
       <div class="row gap"><button class="btn" id="again">再来一轮</button><a class="btn" href="#/">首页</a></div>`;
     $('#again', root).onclick = () => startDrill(task);
+    import('../celebrate.js').then(C => C.sessionDone({ key: 'drill:' + Date.now(), title: `${DRILL_NAME[task]} 完成！`, n: first.length, ok: first.length - wrong.length, avg, lines: by.map(([k, a]) => `${TK[k]} ${a.filter(r => r.ok).length}/${a.length}`) })).catch(e => console.warn(e));
   }
   if (params?.m) start(params.m); else menu();
 }

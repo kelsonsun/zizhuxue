@@ -382,6 +382,7 @@ export async function render(root, _a, params = {}) {
       <p class="muted">练习 ${total} 项${avg != null ? `，作答平均 ${avg} 分` : ''}。不会 ${tally.dunno} · 模糊 ${tally.fuzzy} · 会 ${tally.know} · 熟练 ${tally.master}；答对 ${tally.ok}、答错 ${tally.bad}。</p>
       ${Object.keys(byTask).length ? `<div class="skilltab">${['listen', 'read', 'speak', 'trans', 'write'].filter(k => byTask[k]).map(k => `<div class="sk"><b>${RQT[k]}</b><span>${byTask[k].ok}/${byTask[k].n} 对</span></div>`).join('')}</div>` : ''}
       <p class="muted small">间隔：不会→1 天；模糊 对→9 天/错→3 天；会 对→12 天/错→1 天；熟练→不再出现（生词本里可恢复）。</p><a class="btn primary" href="#/">回首页</a></div>`;
+    if (total) import('../celebrate.js').then(C => C.sessionDone({ key: 'review:' + Date.now(), title: '今天的复习完成了！', n: total, ok: tally.ok, avg, lines: [`练习 ${total} 项`, `不会 ${tally.dunno} · 模糊 ${tally.fuzzy} · 会 ${tally.know} · 熟练 ${tally.master}`] })).catch(e => console.warn(e));
   }
   if (params.go) { draw(); } else plan();
 }
