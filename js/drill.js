@@ -156,7 +156,8 @@ export function sentChoices(item, pool, kind = 'mean', rnd = Math.random) {
 export function wordTextChoices(term, others, rnd = Math.random) {
   const t = String(term).trim(); const lc = t.toLowerCase(); const seen = new Set([lc]); const cand = [];
   for (const o of others) { const v = String(o || '').trim(); if (!v || seen.has(v.toLowerCase())) continue; seen.add(v.toLowerCase()); cand.push(v); }
-  const dis = shuffle(cand.sort((a, b) => lev(lc, a.toLowerCase()) - lev(lc, b.toLowerCase())).slice(0, 6), rnd).slice(0, 3);
+  // 最相近的一个一定出现（真正考辨认拼写），其余从前 6 个相近的里随机挑，题目有变化
+  const near = cand.sort((a, b) => lev(lc, a.toLowerCase()) - lev(lc, b.toLowerCase())).slice(0, 6); const dis = near.length ? [near[0], ...shuffle(near.slice(1), rnd).slice(0, 2)] : [];
   if (dis.length < 2) return null;
   return shuffle([{ t, ok: true }, ...dis.map(x => ({ t: x, ok: false }))], rnd);
 }

@@ -82,3 +82,13 @@ export async function randomSenses(posKeyWanted, n = 20) {
 /** 词典已加载时，同步判断是否有这个词（给词根拆解用）。 */
 export function hasWord(w) { const e = map?.get(String(w).toLowerCase()); return !!(e && !e.lemma); }
 export const ready = () => load();
+/** 词典已加载时，同步取原形（不在词典里就按常见词尾猜，猜不到原样返回）。给生词高亮、词汇统计用。 */
+export function lemmaSync(word) {
+  const w = String(word).toLowerCase().replace(/^['’]+|['’]+$/g, ''); if (!map) return w;
+  const e = map.get(w); if (e?.lemma) return e.lemma; if (e) return w;
+  for (const g of guess(w)) { const x = map.get(g); if (x && !x.lemma) return g; }
+  return w;
+}
+export function rankSync(lemma) { const e = map?.get(lemma); return e && !e.lemma ? e.rank : null; }
+/** 中文 → 英文词（离线反查 ECDICT 释义） */
+export async function reverse(zh, max = 8) { const m = await load(); const { reverseLookup } = await import('./lookup.js'); return reverseLookup(m.entries(), zh, max); }

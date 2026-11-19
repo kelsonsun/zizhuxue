@@ -9,6 +9,7 @@ import * as cloud from './cloud.js';
 import { mountPill } from './transui.js';
 import { job } from './translate.js';
 import { APP_VERSION } from './version.js';
+import * as OFF from './offmode.js';
 const routes = {
   '': () => import('./views/home.js'),
   import: () => import('./views/import.js'),
@@ -21,6 +22,8 @@ const routes = {
   quiz: () => import('./views/quiz.js'),
   me: () => import('./views/settings.js'),
   roots: () => import('./views/roots.js'),
+  vocab: () => import('./views/vocab.js'),
+  achieve: () => import('./views/achieve.js'),
 };
 const TABS = [['', '今日', '🏠'], ['import', '导入', '➕'], ['library', '材料库', '📚'], ['review', '复习', '🔁'], ['me', '我的', '👤']];
 let cleanup = null, navSeq = 0;
@@ -108,11 +111,12 @@ function setupUpdates() {
   let had = !!navigator.serviceWorker.controller, reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!had) { had = true; return; }
+    if (OFF.state.switching) return; // 「离线使用」开关切换：由设置页提示用户重新打开
     if (reloading) return;
     const apply = () => { if (busy()) { showUpdateBar(); return; } reloading = true; location.reload(); };
     apply();
   });
-  navigator.serviceWorker.register('sw.js').then(reg => {
+  navigator.serviceWorker.register(OFF.swUrl()).then(reg => {
     const check = () => reg.update().catch(() => { });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
     setInterval(check, 30 * 60 * 1000);
@@ -132,6 +136,7 @@ async function boot() {
   announceVersion();
   tour.boot().catch(e => console.warn('tour', e));
   watchKeyboard(); warmOfflineParts();
+  import('./progress.js').then(P => P.grant({ kind: 'open', label: '今天打开' })).then(r => { document.documentElement.dataset.openGot = r.got.s || 0; }).catch(() => { }); // v1.7：每天第一次打开 +5 星（每天只给一次）
   // 云同步：未绑定时什么都不做；已绑定则后台自动同步，收到别的设备的改动后刷新当前页（正在做事时不打断）
   cloud.boot().catch(e => console.warn('sync', e));
   addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
@@ -145,7 +150,7 @@ function watchKeyboard() {
 // 联网时在后台悄悄缓存 PDF / Word 组件（约 1.8MB），装到主屏后断网也能导入 PDF/Word；
 // 截图识别组件较大（约 11MB），不自动下载，首次使用或在「我的 → 离线使用」里手动缓存。省流量模式下不自动下载。
 function warmOfflineParts() {
-  if (!('serviceWorker' in navigator) || isNativeApp() || navigator.onLine === false || navigator.connection?.saveData) return;
+  if (!('serviceWorker' in navigator) || isNativeApp() || !OFF.offlineOn() || navigator.onLine === false || navigator.connection?.saveData) return;
   const run = async () => {
     try {
       await navigator.serviceWorker.ready;
