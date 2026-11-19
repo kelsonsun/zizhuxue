@@ -7,6 +7,7 @@ import * as sp from './speech.js';
 import * as nlp from './nlp.js';
 import { settings, aiBtn, makeCard } from './state.js';
 import { $, $$, esc, toast, sheet, wordsHtml, tokensOf, hilite } from './ui.js';
+import { mountRootBox } from './rootbox.js';
 
 export const recs = new Map(); // 本次打开期间的跟读录音（不落盘）
 const cardsOf = ctx => db.cards.all().then(a => a.filter(c => c.materialId === ctx.m.id));
@@ -31,6 +32,7 @@ export async function openWordSheet(ctx, s, k) {
     <div class="field"><label for="wph">音标</label><input id="wph" placeholder="（可空）"></div>
     <div class="field"><label for="wzh">中文释义</label><textarea id="wzh" rows="2" placeholder="释义"></textarea></div>
     <div class="muted small" id="wsrc" role="status"></div>
+    <div id="wroot"></div>
     <h3>不同词义（义项）</h3>
     <div id="senses" class="senses"></div>
     <div id="wai-box">${aiBtn('wsense', '判断本句用的义项并补例句')}</div><div class="muted small" id="wsenseMsg" role="status"></div>
@@ -72,6 +74,7 @@ export async function openWordSheet(ctx, s, k) {
     let d = null;
     if (!/\s/.test(t)) { try { d = await dict.lookup(t); } catch { } }
     if (my !== seq) return;
+    if (/\s/.test(t) || !t) E('#wroot').innerHTML = ''; else mountRootBox(E('#wroot'), t, { lemma: d?.lemma });
     if (d) { info.senses = d.senses; if (cached && cached.index >= 0) info.picked = cached.index; await guessPos(); }
     renderSenses(); renderEx();
     if (ex) { if (ex.sense && d) { const i = d.senses.findIndex(x => x.pos === ex.sense.pos && x.zh === ex.sense.zh); if (i >= 0) { info.picked = i; renderSenses(); } } return; }

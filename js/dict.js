@@ -79,3 +79,6 @@ export async function randomSenses(posKeyWanted, n = 20) {
   }
   return out;
 }
+/** 词典已加载时，同步判断是否有这个词（给词根拆解用）。 */
+export function hasWord(w) { const e = map?.get(String(w).toLowerCase()); return !!(e && !e.lemma); }
+export const ready = () => load();

@@ -1,3 +1,4 @@
+import * as R from './roots.js';
 // 练习式复习的核心算法（纯函数，可单测）：
 // 1) 按遗忘曲线选内容：SM-2 到期 + 新卡；同时计算“此刻的遗忘概率”。
 // 2) 每项算难度分（词频/句长、历史错误率、SM-2 的 EF、遗忘概率）。
@@ -71,9 +72,22 @@ export function orderEasyToHard(items, key = x => x.diff) {
 }
 
 /** 题型：listen 听写/听说（最易）< cloze 原句填空 < zh2en 看中文说英文（最难）。都要求说出或写出英文。 */
-export const QTYPES = { listen: '听音说/写', cloze: '原句填空', zh2en: '看中文说英文' };
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+/** 选择题（拆解推测 / 词根配对）的选项：{answer, options}。干扰项优先取同一词根家族，意思不重复。 */
+export function rootQuestion(card, qt) {
+  const e = R.entry(card.term); if (!e) return null; const r = R.rootById(e.root);
+  if (qt === 'rootm') {
+    const others = shuffle(R.allRoots().filter(x => x.id !== r.id)).slice(0, 3).map(x => x.m);
+    return { answer: r.m, options: shuffle([r.m, ...others]), root: r, e };
+  }
+  const ans = R.brief(e.zh); const seen = new Set([ans]); const pool = [];
+  for (const x of shuffle([...R.family(r.id)]).concat(shuffle(R.allRoots().flatMap(y => R.family(y.id))))) { const b = R.brief(x.zh); if (x.w !== e.w && !seen.has(b)) { seen.add(b); pool.push(b); } if (pool.length >= 3) break; }
+  return { answer: ans, options: shuffle([ans, ...pool]), root: r, e };
+}
+export const QTYPES = { listen: '听音说/写', cloze: '原句填空', zh2en: '看中文说英文', parts: '拆解推测', rootm: '词根配对' };
+/** v1.5：属于内置词根家族的生词，多两种题：拆解推测（看拆解选意思，新卡先做）、词根配对（这个词根是什么意思）。 */
 export function availableTypes(card) {
-  const t = ['listen'];
+  const t = card.type === 'word' && card.root && R.entry(card.term) ? ['parts', 'rootm', 'listen'] : ['listen'];
   if ((card.type !== 'sentence') && card.sentence?.en && card.sentence.en.toLowerCase().includes(String(card.term).toLowerCase()) && card.sentence.en.trim().toLowerCase() !== String(card.term).trim().toLowerCase()) t.push('cloze');
   if (card.zh && card.zh.trim()) t.push('zh2en');
   return t;

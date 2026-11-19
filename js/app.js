@@ -20,6 +20,7 @@ const routes = {
   review: () => import('./views/review.js'),
   quiz: () => import('./views/quiz.js'),
   me: () => import('./views/settings.js'),
+  roots: () => import('./views/roots.js'),
 };
 const TABS = [['', '今日', '🏠'], ['import', '导入', '➕'], ['library', '材料库', '📚'], ['review', '复习', '🔁'], ['me', '我的', '👤']];
 let cleanup = null, navSeq = 0;
@@ -39,7 +40,7 @@ async function doRender(seq) {
   tts.cancel();
   const root = $('#app');
   const loader = routes[name] ?? routes[''];
-  const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', review: 'review', me: 'me' }[name] ?? '';
+  const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', roots: 'library', review: 'review', me: 'me' }[name] ?? '';
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   root.scrollTop = 0; window.scrollTo(0, 0);
   try {
