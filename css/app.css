@@ -315,3 +315,29 @@ details.help.sec>summary{color:inherit}details.help.sec>summary h2{margin:0}deta
 @media (pointer:coarse){.walletln{display:inline-flex;align-items:center;min-height:44px}}
 .celeb ~ .backdrop{z-index:1100}
 .celeb.under{visibility:hidden}
+/* v1.8 拍照即查 */
+.snapbtns label.btn{width:100%}
+.snapscroll{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:#fff;margin:8px 0;max-height:75vh}
+.snapwrap{position:relative;width:100%}.snapscroll.zoom .snapwrap{width:220%}
+.snapimg{display:block;width:100%;height:auto;max-width:100%;border-radius:12px;user-select:none;-webkit-user-select:none}.snapwrap .snapimg{border-radius:0;height:100%}
+.snapov{position:absolute;inset:0;cursor:crosshair}
+.snw{position:absolute;padding:0;margin:0;min-width:0;min-height:0;border:0;border-bottom:2px solid #1f6f5c66;background:transparent;border-radius:3px;cursor:pointer}
+.snapov.sent .snw{border-bottom-color:#3f6fc866}
+.snw.on{background:#ffd54a88;outline:2px solid #e0a800}.snw.ctx{background:#1f6f5c1f}
+.snapsel{margin:6px 0}.snapmode{margin-top:10px}.snaptext textarea{margin:8px 0}.snaptext summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+.snaplink{display:block;text-decoration:none;color:var(--ink);margin:6px 0}
+/* v1.8 学习提醒 */
+.captbl{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}.captbl th,.captbl td{border:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}.captbl th{background:#f3f1ea}
+#remCap .warn,#remSt.warn{color:var(--warn)}
+/* v1.8 收到分享 */
+.shitem .row{margin-top:8px}.shtext{white-space:pre-wrap;margin:6px 0;font-size:16px}.shtext.clamp{max-height:9.5em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
+.shlink{word-break:break-all;margin:6px 0}.shimg{display:block;max-width:100%;max-height:260px;border-radius:10px;margin:8px 0;border:1px solid var(--line)}
+/* v1.8 双语对照 */
+.bictl{display:flex;gap:8px;flex-wrap:wrap}.bictl .seg{flex:1;min-width:200px;margin:4px 0}
+.bi{margin:10px 0;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:4px 14px}
+.bi .birow{padding:10px 0;border-bottom:1px solid var(--line)}.bi .birow:last-child{border-bottom:0}
+.bi.side .birow,.bi.side .bihead{display:grid;grid-template-columns:1fr 1fr;gap:14px}.bi .bihead{padding:8px 0;border-bottom:2px solid var(--line);color:var(--mut);font-size:14px}
+.bi.stack .bizh{margin-top:4px}.bien{font-family:Georgia,"Times New Roman",serif;font-size:17px;line-height:1.55}.bizh{color:#3b4a44;font-size:16px;line-height:1.6}
+@media(max-width:520px){.bi.side .birow{gap:10px}.bi.side .bien{font-size:15px}.bi.side .bizh{font-size:14px}}
+.bich{margin:18px 0 4px;font-size:18px}.printonly{display:none}
+@media print{#tabbar,.noprint,#updbar,#toast,.pill{display:none!important}.printonly{display:block}body,#app{background:#fff;padding:0;margin:0}.bi{border:0;padding:0}.birow{break-inside:avoid}}
