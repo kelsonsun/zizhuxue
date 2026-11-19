@@ -239,3 +239,30 @@ mark{background:#ffe9a8;border-radius:3px;padding:0 1px}
 .splitprev{margin:8px 0;padding-top:6px;border-top:1px dashed var(--line)}
 .splitprev .sp{display:flex;align-items:center;gap:6px;margin:4px 0}.splitprev .idx{flex:none}.sptext{flex:1;min-width:0}
 .rc-h{flex-wrap:wrap;row-gap:4px}.rc-h .spk{flex:1 1 110px}
+/* v1.6 拆分时译文跟着分段 */
+.spzh{display:block;color:var(--mut);font-size:14px;margin-top:1px}
+.zhadj{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
+.zhwords{font-size:16px}.zhwords .cutgap{margin:0 -12px}
+.zhadj .retr{margin-top:6px;align-items:center}.warnz{margin:6px 0;padding:6px 10px}
+@media (pointer:coarse){html .splitbox .mini{min-height:44px}}
+/* v1.6 反馈 */
+.top .fbtop{min-height:44px;padding:6px 12px;font-size:15px;border-color:#e8b4a0;background:#fff6f1;color:#9a3b12;align-self:center}
+.fbtype a{cursor:pointer}.fbshotbtn{width:auto}.fbshot{display:flex;align-items:center;gap:8px;margin-top:6px}.fbshot img{max-width:120px;max-height:160px;border-radius:8px;border:1px solid var(--line)}
+.fbsend{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.fbsend .btn{width:100%}
+.fbtext{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;max-height:28vh;overflow:auto;user-select:text;-webkit-user-select:text}
+.fbenv summary{cursor:pointer;min-height:32px}.fblist .row{margin-top:4px}
+@media (pointer:coarse){html .fblist .mini,html .fbshot .mini{min-height:44px}}
+/* v1.6 测验：听说读译为主，每题自己选作答方式 */
+.amodes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 2px}.amodes .btn{padding:6px 4px;min-height:48px;font-size:15px}
+.amodes .btn.on{background:var(--ac);color:#fff;border-color:var(--ac)}.amodes .btn:disabled{opacity:.4}
+.amnote{margin:2px 0 8px}.trdir{margin-top:8px}.trdir a{cursor:pointer}
+.dr-en{font-size:20px;line-height:1.45;margin:6px 0}
+.diff .near,.legend .near{color:var(--warn);text-decoration:underline dotted}
+.ovr{align-items:center;margin:6px 0}
+.primary-item{border-color:var(--ac);background:var(--ac2)}.qintro{margin:0 0 8px}.qsub{margin:16px 0 6px;font-size:15px;color:var(--mut)}
+.skilltab{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}.skilltab .sk{display:flex;flex-direction:column;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+@media (pointer:coarse){html .ovr .mini,html .rv-ans .mini{min-height:44px;min-width:44px}}
+/* v1.6 篇章阅读理解 */
+.dr-en.passage{font-size:17px;line-height:1.6;text-align:left;font-weight:500}
+.tag.pqsrc{background:#eef6ee;color:#2d6a3e}.tag.pqsrc.ai{background:#eef1fb;color:#3c4fa0}
+.pqans{margin-top:6px}.pqwhy{margin-top:4px;text-align:left}
