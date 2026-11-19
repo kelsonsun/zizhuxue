@@ -1,9 +1,9 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '92f7b262ae';
+const VERSION = '52ac987188';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
-const isVendor = u => /\/vendor\/(tesseract|pdfjs|mammoth)\//.test(u.pathname);
+const isVendor = u => /\/vendor\/(tesseract|pdfjs|mammoth|amrnb)\//.test(u.pathname);
 // 本机转写的运行库（jsDelivr 上固定版本的 transformers.js 与 WASM）：首次用时缓存，之后离线可用。模型文件由 transformers.js 自己存进「transformers-cache」。
 const ASR = 'zizhuxue-asr-1';
 const isAsrLib = u => u.hostname === 'cdn.jsdelivr.net' && /^\/npm\/@huggingface\/transformers@\d/.test(u.pathname);
