@@ -48,8 +48,9 @@ export async function readFileAsText(file) {
   throw new Error('暂不支持 .' + e + ' 文件（支持 srt/vtt/txt/docx/pdf）');
 }
 
-let ocrWorker = null;
-export async function ocrImage(file, onProgress = () => {}) {
+let ocrWorker = null, ocrProgress = () => {};
+export async function ocrImage(file, onProgress = () => {}, initOnly = false) {
+  ocrProgress = onProgress; // 进度回调跟着本次调用走（识别引擎只建一次）
   await loadScript('vendor/tesseract/tesseract.min.js');
   if (!ocrWorker) {
     ocrWorker = await globalThis.Tesseract.createWorker('eng', 1, {
@@ -57,11 +58,18 @@ export async function ocrImage(file, onProgress = () => {}) {
       corePath: abs('vendor/tesseract/core'),
       langPath: abs('vendor/tesseract/lang'),
       gzip: !globalThis.Capacitor?.isNativePlatform?.() || globalThis.Capacitor?.getPlatform?.() !== 'android', // 安卓打包会把 assets 里的 .gz 自动解压并去掉后缀
-      logger: m => { if (m.status) onProgress(m); },
+      logger: m => { if (m.status) ocrProgress(m); },
     });
   }
+  if (initOnly) return null;
   const { data } = await ocrWorker.recognize(file);
   return { text: data.text.trim(), confidence: data.confidence };
+}
+/** v1.8 拍照即查：同一个本地识别引擎，另外返回每个词的像素坐标（块 → 段 → 行 → 词），用来在原图上直接点词 */
+export async function ocrWords(image, onProgress = () => {}) {
+  await ocrImage(null, onProgress, true);
+  const { data } = await ocrWorker.recognize(image, {}, { text: true, blocks: true });
+  return { text: (data.text || '').trim(), confidence: data.confidence, data };
 }
 /** 软合并：PDF/OCR 里被排版硬换行的句子并回一行；已有句末标点的行、中文行、标题行保持独立。 */
 export function unwrapSoft(t) {

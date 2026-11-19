@@ -24,6 +24,9 @@ const routes = {
   roots: () => import('./views/roots.js'),
   vocab: () => import('./views/vocab.js'),
   achieve: () => import('./views/achieve.js'),
+  snap: () => import('./views/snap.js'),
+  shared: () => import('./views/shared.js'),
+  bilingual: () => import('./views/bilingual.js'),
 };
 const TABS = [['', '今日', '🏠'], ['import', '导入', '➕'], ['library', '材料库', '📚'], ['review', '复习', '🔁'], ['me', '我的', '👤']];
 let cleanup = null, navSeq = 0;
@@ -44,7 +47,7 @@ async function doRender(seq) {
   session.trail = [...(session.trail || []), location.hash || '#/'].slice(-6); // 反馈里附上“之前去过的页面”
   const root = $('#app');
   const loader = routes[name] ?? routes[''];
-  const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', roots: 'library', review: 'review', me: 'me' }[name] ?? '';
+  const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', roots: 'library', bilingual: 'library', shared: 'import', review: 'review', me: 'me' }[name] ?? '';
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   root.scrollTop = 0; window.scrollTo(0, 0);
   try {
@@ -139,6 +142,8 @@ async function boot() {
   import('./progress.js').then(P => P.grant({ kind: 'open', label: '今天打开' })).then(r => { document.documentElement.dataset.openGot = r.got.s || 0; }).catch(() => { }); // v1.7：每天第一次打开 +5 星（每天只给一次）
   // 云同步：未绑定时什么都不做；已绑定则后台自动同步，收到别的设备的改动后刷新当前页（正在做事时不打断）
   cloud.boot().catch(e => console.warn('sync', e));
+  import('./remind.js').then(R => R.boot()).catch(e => console.warn('remind', e)); // v1.8 学习提醒：开着就按设置重新排好
+  import('./share.js').then(S => S.boot()).catch(e => console.warn('share', e));    // v1.8 安卓「分享到自主学」（App 里的 intent）
   addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
 }
 // 手机键盘弹出时（文本框获得焦点）隐藏底部导航栏，避免它被顶到键盘上方挡住输入框

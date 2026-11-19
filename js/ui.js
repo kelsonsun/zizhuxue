@@ -25,8 +25,15 @@ export function confirmDlg(msg, { ok = '确定', cancel = '取消', danger = fal
     s.el.querySelector('[data-no]').onclick = () => s.close();
   });
 }
-export function download(name, text, type = 'application/json') {
-  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+export async function download(name, text, type = 'application/json') {
+  const blob = text instanceof Blob ? text : new Blob([text], { type });
+  // v1.8 安卓 App 的 WebView 不支持 <a download>：交给原生插件存进手机的「下载」文件夹
+  const SI = globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.ShareIn;
+  if (SI?.save) {
+    const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+    const r = await SI.save({ name, type, data: b64 }); toast(`已保存到手机的「下载」文件夹：${r?.name || name}`, 4000); return r;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 export const fmtDate = ts => new Date(ts).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
