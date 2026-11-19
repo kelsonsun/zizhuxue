@@ -230,7 +230,7 @@ export async function render(root, [id], params = {}) {
     }
     $('#autoWords', root)?.addEventListener('click', autoWords);
     $('#aiCards', root)?.addEventListener('click', aiCards);
-    $('#editSents', root)?.addEventListener('click', () => { session.draft = { title: m.title, tags: [...(m.tags || [])], source: m.source, editId: m.id, audioId, rows: m.sentences.map(s => ({ ...s })) }; go('#/draft'); });
+    $('#editSents', root)?.addEventListener('click', () => { session.draft = { title: m.title, tags: [...(m.tags || [])], source: m.source, editId: m.id, audioId, ...(m.pauses ? { pauses: m.pauses } : {}), rows: m.sentences.map(s => ({ ...s })) }; go('#/draft'); });
     $('#info', root)?.addEventListener('click', infoSheet);
   };
 

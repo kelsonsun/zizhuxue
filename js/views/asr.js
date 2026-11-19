@@ -88,7 +88,8 @@ export async function render(root, [id]) {
       const mm = await db.materials.get(id);
       mm.asr = { engine, model: engine === 'api' ? r.model : M.model, sec: +sec.toFixed(1), rtf: r.rtf ? +r.rtf.toFixed(3) : undefined, at: Date.now() }; await db.materials.save(mm);
       session.draft = { title: mm.title, tags: [...(mm.tags || [])], source: 'audio', editId: id, fresh: true, audioId: id, asrInfo: `${engine === 'api' ? 'AI 转写（' + r.model + '）' : '本机转写（' + M.label + ' · ' + M.model + '）'} · ${fmtLen(dur)}音频用时 ${T.fmtClock(sec)}`,
-        rows: rows.map(x => ({ speaker: '', en: x.en, zh: x.zh, t0: x.t0, t1: x.t1 })) };
+        rows: rows.map(x => ({ speaker: '', en: x.en, zh: x.zh, t0: x.t0, t1: x.t1, ...(x.wt ? { wt: x.wt } : {}) })),
+        pauses: T.findPauses(pcm).map(p => [p.a, p.b]) }; // 停顿只用于拆分时微调原声时间
       toast(`转写完成：${rows.length} 句`); go('#/draft');
     } catch (e) {
       if (e.name === 'AbortError') { toast('已取消转写'); return choose(); }
