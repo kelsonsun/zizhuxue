@@ -1,5 +1,5 @@
 {
- "version": "efa61564ff",
+ "version": "ee90002697",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -29,6 +29,7 @@
   "js/sense.js",
   "js/sm2.js",
   "js/speech.js",
+  "js/splitrow.js",
   "js/state.js",
   "js/structure.js",
   "js/sync.js",
