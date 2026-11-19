@@ -18,7 +18,8 @@ const OFFLINE_ASSETS = ['vendor/tesseract/tesseract.min.js', 'vendor/tesseract/w
 export async function render(root) {
   const c = ai.getConfig() || { baseUrl: '', apiKey: '', model: '' };
   root.innerHTML = `
-  <header class="top"><h1>我的</h1><span class="muted">设置、AI、备份</span></header>
+  <header class="top"><h1>我的</h1><button class="btn fbtop" id="fbTop" aria-label="反馈问题或提建议">🐞 反馈</button><span class="muted">设置、AI、备份、反馈</span></header>
+  <section class="card fbcard" id="fbCard"><h2>反馈与建议</h2><div id="fbBox"></div></section>
 
   <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${ai.isConfigured() ? '已配置' : '未配置'}</span></h2>
     <p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>
@@ -76,6 +77,7 @@ export async function render(root) {
     <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></section>
 
   <section class="card"><h2>关于</h2><p class="muted small">自主学 v${APP_VERSION}（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></section>`;
+  { const FU = await import('../feedbackui.js'); FU.mountHistory($('#fbBox', root)); $('#fbTop', root).onclick = () => FU.openFeedback({}, { onClose: () => FU.mountHistory($('#fbBox', root)) }); }
   const E = id => $(id, root);
   renderSync(root);
   const qs = new URLSearchParams(location.hash.split('?')[1] || ''); // 扫配对二维码打开：#/me?pair=CODE&srv=URL

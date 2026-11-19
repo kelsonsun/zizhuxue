@@ -7,6 +7,7 @@ import { openTranslate } from '../transui.js';
 import { onLeave } from '../app.js';
 import { undoBar } from '../matdelete.js';
 import * as SP from '../splitrow.js';
+import * as TR from '../translate.js';
 
 const TAGS = ['诊所', '日常', '工作', '旅行', '购物', '社交'];
 
@@ -18,9 +19,12 @@ export async function render(root) {
   if (d.audioId) { const b = await db.blobs.get('audio:' + d.audioId).catch(() => null); if (b) { auBlob = b.blob; auUrl = URL.createObjectURL(b.blob); } }
   // v1.5.1 拆分：切点由用户点选；undo 栈同时记录拆分与合并
   let splitI = null, cuts = new Set(), pauseJob = null; const undo = [];
+  // v1.6 译文跟着拆：zcuts 用户在预览里点过的译文切点（null=自动对齐）；zov AI 微调/重新翻译后的各段译文；zsrc 切点来源
+  let zcuts = null, zov = null, zsrc = null, aiTok = 0, aiBusy = false, aiErr = '', aiTimer = null, mtBusy = '';
+  const resetOther = () => { zcuts = null; zov = null; zsrc = null; aiErr = ''; aiTok++; aiBusy = false; clearTimeout(aiTimer); };
   const snap = () => d.rows.map(r => ({ ...r }));
   const pushUndo = (what) => { undo.push({ what, rows: snap() }); if (undo.length > 30) undo.shift(); };
-  const doUndo = () => { const u = undo.pop(); if (!u) return; sync(); d.rows = u.rows; splitI = null; draw(); toast('已撤销' + u.what); };
+  const doUndo = () => { const u = undo.pop(); if (!u) return; sync(); d.rows = u.rows; splitI = null; cuts = new Set(); resetOther(); draw(); toast('已撤销' + u.what); };
   const pauses = () => (d.pauses || []).map(p => Array.isArray(p) ? { a: p[0], b: p[1] } : p);
   // 已保存的旧材料没有停顿数据：第一次拆分时从录音里测一次（只用于微调时间）
   const ensurePauses = () => {
@@ -38,35 +42,86 @@ export async function render(root) {
   const tfmt = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
   const tfmt1 = t => Math.floor(t / 60) + ':' + (t % 60).toFixed(1).padStart(4, '0');
   const HOW = { word: '原声按逐词时间切开', pause: '原声切点已对齐到附近的停顿', est: '原声切点按字数比例估算（附近没测到停顿），请试听核对' };
+  const OHOW = { auto: '按标点和长度比例自动对齐，请核对', user: '你调整过', ai: 'AI 按原文分段对齐（只切开原译文，没改字）', 'ai-adj': 'AI 对齐时微调了措辞，请核对', 'mt:ai': 'AI 各段重新翻译，请核对', 'mt:mymemory': 'MyMemory 各段重新翻译，请核对', short: '译文太短分不开，先留在第 1 句' };
+  const curPlan = (i = splitI) => SP.planSplit(d.rows[i], [...cuts], { pauses: pauses() });
+  /** 译文怎么分；mismatch：用户点的译文切点个数和原文对不上 */
+  const curOther = (plan, i = splitI) => {
+    const r = d.rows[i]; const need = plan.pieces.length - 1;
+    if (zov && zov.texts.length === plan.pieces.length) return { ...SP.planOther(r, plan, { texts: zov.texts, how: zov.how }), zcutsShown: null };
+    if (zcuts && zcuts.size !== need) { const o = SP.planOther(r, plan); return { ...o, mismatch: need - zcuts.size, zcutsShown: [...zcuts] }; }
+    const o = SP.planOther(r, plan, { cuts: zcuts ? [...zcuts] : null }); if (zsrc === 'ai' && o.how === 'user') o.how = 'ai';
+    return { ...o, zcutsShown: o.cuts };
+  };
   const splitHtml = (i) => {
-    const r = d.rows[i]; const plan = SP.planSplit(r, [...cuts], { pauses: pauses() }); const toks = plan.toks;
+    const r = d.rows[i]; const plan = curPlan(i); const toks = plan.toks;
     const hows = [...new Set(plan.pieces.slice(0, -1).map(p => p.how).filter(Boolean))];
+    const oth = curOther(plan, i), OL = oth.field === 'zh' ? '中文' : '英文', hasO = oth.how !== 'none', zs = new Set(oth.zcutsShown || []);
     return `<div class="splitbox" role="group" aria-label="拆分第${i + 1}句">
-      <p class="small"><b>✂ 拆分：</b>点两个词之间的竖线，就从那里断开；可以点多处，再点一次取消。</p>
+      <p class="small"><b>✂ 拆分：</b>点两个词之间的竖线，就从那里断开；可以点多处，再点一次取消。${hasO ? `${OL}译文会跟着分成对应的段。` : ''}</p>
       <div class="splitwords" lang="${plan.field === 'zh' ? 'zh' : 'en'}">${toks.map((t, j) => `<span class="sw">${esc(t.s)}</span>${j < toks.length - 1 ? `<button type="button" class="cutgap ${cuts.has(j) ? 'on' : ''}" data-cut="${j}" aria-pressed="${cuts.has(j)}" aria-label="在“${esc(t.s)}”后面断开"><i></i></button>` : ''}`).join('')}</div>
-      ${cuts.size ? `<div class="splitprev" aria-live="polite"><div class="muted small">切开后（${plan.pieces.length} 句）${auUrl && r.t0 != null ? '，每段可先试听：' : '：'}</div>${plan.pieces.map((p, k) => `<div class="sp"><span class="idx">${i + k + 1}</span>${auUrl && p.t0 != null ? `<button type="button" class="mini" data-try="${k}" aria-label="试听第${k + 1}段">▶ <small>${tfmt1(p.t0)}–${tfmt1(p.t1)}</small></button>` : ''}<span class="sptext">${esc(p.text)}</span></div>`).join('')}
+      ${cuts.size ? `<div class="splitprev" aria-live="polite"><div class="muted small">切开后（${plan.pieces.length} 句）${auUrl && r.t0 != null ? '，每段可先试听：' : '：'}</div>${plan.pieces.map((p, k) => `<div class="sp"><span class="idx">${i + k + 1}</span>${auUrl && p.t0 != null ? `<button type="button" class="mini" data-try="${k}" aria-label="试听第${k + 1}段">▶ <small>${tfmt1(p.t0)}–${tfmt1(p.t1)}</small></button>` : ''}<span class="sptext">${esc(p.text)}${hasO ? `<span class="spzh" data-zp="${k}">${oth.mismatch ? '<span class="muted">（' + OL + '断开处还没对齐）</span>' : esc(oth.texts[k]) || '<span class="muted">（这段没有' + OL + '）</span>'}</span>` : ''}</span></div>`).join('')}
         ${hows.length ? `<div class="muted small">${hows.map(h => HOW[h]).join('；')}。</div>` : ''}${pauseJob && !d.pauses ? '<div class="muted small">正在从录音里测停顿，用来微调切点时间…</div>' : ''}
-        ${plan.field === 'en' && r.zh ? '<div class="muted small">中文翻译先留在第 1 句，其余句可以手填或用 AI 补齐。</div>' : ''}</div>`
+        ${hasO ? `<div class="zhadj"><div class="small"><b>${OL}对应的断开处</b>（<span class="ohow">${aiBusy ? 'AI 正在对齐…先显示自动对齐' : OHOW[oth.how] || ''}</span>）${oth.zcutsShown ? `：点${oth.field === 'zh' ? '字与字' : '词与词'}之间调整` : ''}</div>
+          ${oth.zcutsShown ? `<div class="splitwords zhwords" lang="${oth.field === 'zh' ? 'zh' : 'en'}">${oth.toks.map((t, j) => `<span class="sw">${esc(t.s)}</span>${j < oth.toks.length - 1 ? `<button type="button" class="cutgap ${zs.has(j) ? 'on' : ''}" data-zcut="${j}" aria-pressed="${zs.has(j)}" aria-label="${OL}在“${esc(t.s)}”后面断开"><i></i></button>` : ''}`).join('')}</div>` : `<p class="muted small">现在用的是${zov?.how?.startsWith('mt:') ? '重新翻译' : 'AI 微调'}后的${OL}。<button type="button" class="mini" data-zreset>改回按原译文切开</button></p>`}
+          ${oth.mismatch ? `<div class="note small warnz">${OL}断开处${oth.mismatch > 0 ? '还差 ' + oth.mismatch : '多了 ' + -oth.mismatch} 个：再点一处${oth.mismatch > 0 ? '' : '已选的取消'}，让每段原文都有对应的${OL}。</div>` : ''}
+          ${aiErr ? `<div class="muted small">AI 对齐没成功（${esc(aiErr)}），已用自动对齐。</div>` : ''}
+          <div class="row gap wrap retr">${ai.isConfigured() ? `<button type="button" class="mini" data-realign>🤖 AI 重新对齐</button>` : ''}<span class="muted small">或各段重新翻译：</span>${ai.isConfigured() ? `<button type="button" class="mini" data-retr="ai">${mtBusy === 'ai' ? '翻译中…' : 'AI 翻译'}</button>` : ''}<button type="button" class="mini" data-retr="mymemory">${mtBusy === 'mymemory' ? '翻译中…' : 'MyMemory 翻译'}</button>${zcuts || zov ? '<button type="button" class="mini" data-zauto>恢复自动对齐</button>' : ''}</div></div>` : ''}</div>`
       : '<p class="muted small">还没选切点。</p>'}
-      <div class="row gap"><button type="button" class="btn" data-splitcancel>取消</button><button type="button" class="btn primary grow" data-splitok ${cuts.size ? '' : 'disabled'}>✂ 拆成 ${plan.pieces.length} 句</button></div></div>`;
+      <div class="row gap"><button type="button" class="btn" data-splitcancel>取消</button><button type="button" class="btn primary grow" data-splitok ${cuts.size && !oth.mismatch && !mtBusy ? '' : 'disabled'}>✂ 拆成 ${plan.pieces.length} 句</button></div></div>`;
   };
   const drawSplit = () => { const card = $(`.rowcard[data-i="${splitI}"]`, root); if (!card) return; const box = $('.splitbox', card); box.outerHTML = splitHtml(splitI); bindSplit(card); };
+  /** 有 AI：原文切点定下来后（停 0.6 秒），让 AI 把原译文按段对齐切开 */
+  const scheduleAi = (now = false) => {
+    clearTimeout(aiTimer); const i = splitI; const r = d.rows[i]; if (i == null || !cuts.size || !ai.isConfigured()) return;
+    const plan = curPlan(i); const of = plan.field === 'en' ? 'zh' : 'en'; const other = (r[of] || '').trim(); if (!other) return;
+    const tok = ++aiTok; aiBusy = true; aiErr = '';
+    aiTimer = setTimeout(async () => {
+      try {
+        const res = await ai.alignSplit(plan.pieces.map(p => p.text), other, plan.field === 'en' ? 'en2zh' : 'zh2en'); if (tok !== aiTok || splitI !== i) return;
+        const toks = SP.tokenize(other, of === 'zh'); const cs = !res.changed && SP.cutsFromTexts(other, toks, res.t);
+        if (cs) { zcuts = new Set(cs); zov = null; zsrc = 'ai'; } else { zov = { texts: res.t, how: 'ai-adj' }; zcuts = null; zsrc = 'ai'; }
+      } catch (e) { if (tok !== aiTok) return; aiErr = e.message; }
+      aiBusy = false; if (splitI === i) drawSplit();
+    }, now ? 0 : 600);
+  };
   const bindSplit = (card) => {
-    $$('[data-cut]', card).forEach(b => b.onclick = () => { const j = +b.dataset.cut; cuts.has(j) ? cuts.delete(j) : cuts.add(j); drawSplit(); $(`[data-cut="${j}"]`, card)?.focus({ preventScroll: true }); });
-    $$('[data-try]', card).forEach(b => b.onclick = () => { const p = SP.planSplit(d.rows[splitI], [...cuts], { pauses: pauses() }).pieces[+b.dataset.try]; playSeg(p, b); });
-    $('[data-splitcancel]', card).onclick = () => { au?.pause(); splitI = null; cuts = new Set(); draw(); };
+    $$('[data-cut]', card).forEach(b => b.onclick = () => { const j = +b.dataset.cut; cuts.has(j) ? cuts.delete(j) : cuts.add(j); resetOther(); scheduleAi(); drawSplit(); $(`[data-cut="${j}"]`, card)?.focus({ preventScroll: true }); });
+    // 译文切点：点已选的 → 取消；还差 → 加上；个数够了 → 把最近的那个挪过来（一次点击就能微调）
+    $$('[data-zcut]', card).forEach(b => b.onclick = () => {
+      const j = +b.dataset.zcut; const plan = curPlan(); const need = plan.pieces.length - 1; const o = curOther(plan);
+      const z = new Set(zcuts || o.zcutsShown || []); aiTok++; aiBusy = false; clearTimeout(aiTimer); zov = null; zsrc = 'user';
+      if (z.has(j)) z.delete(j); else if (z.size < need) z.add(j); else { let best = null; for (const x of z) if (best == null || Math.abs(x - j) < Math.abs(best - j)) best = x; z.delete(best); z.add(j); }
+      zcuts = z; drawSplit(); $(`[data-zcut="${j}"]`, card)?.focus({ preventScroll: true });
+    });
+    $('[data-zreset]', card)?.addEventListener('click', () => { zov = null; drawSplit(); });
+    $('[data-zauto]', card)?.addEventListener('click', () => { resetOther(); drawSplit(); });
+    $('[data-realign]', card)?.addEventListener('click', () => { resetOther(); scheduleAi(true); drawSplit(); });
+    $$('[data-retr]', card).forEach(b => b.onclick = async () => {
+      const prov = b.dataset.retr; if (mtBusy) return; const plan = curPlan(); const dir = plan.field === 'en' ? 'en2zh' : 'zh2en';
+      if (prov === 'mymemory' && !session.mmOk && !(await confirmDlg('各段原文会逐段发送到第三方公共翻译服务 MyMemory（免费、匿名额度约 5000 字/天）。继续吗？', { ok: '继续翻译' }))) return;
+      if (prov === 'mymemory') session.mmOk = true;
+      mtBusy = prov; drawSplit();
+      try {
+        const src = plan.pieces.map(p => p.text); const out = await TR.translateTexts(prov, src, dir);
+        if (out.some((t, k) => !TR.plausible(src[k], t, dir))) throw new Error('有的段没有翻译出来');
+        aiTok++; aiBusy = false; zov = { texts: out, how: 'mt:' + prov }; zcuts = null; toast(`已重新翻译 ${out.length} 段（${TR.SHORT[prov]}，请核对）`);
+      } catch (e) { toast((TR.SHORT[prov] || prov) + '失败：' + e.message, 5000); }
+      mtBusy = ''; drawSplit();
+    });
+    $$('[data-try]', card).forEach(b => b.onclick = () => { const p = curPlan().pieces[+b.dataset.try]; playSeg(p, b); });
+    $('[data-splitcancel]', card).onclick = () => { au?.pause(); splitI = null; cuts = new Set(); resetOther(); draw(); };
     $('[data-splitok]', card).onclick = () => {
-      const i = splitI, r = d.rows[i]; const plan = SP.planSplit(r, [...cuts], { pauses: pauses() }); if (plan.pieces.length < 2) return;
-      au?.pause(); pushUndo('拆分'); d.rows.splice(i, 1, ...SP.applySplit(r, plan)); splitI = null; cuts = new Set(); draw();
+      const i = splitI, r = d.rows[i]; const plan = curPlan(); if (plan.pieces.length < 2) return; const o = curOther(plan); if (o.mismatch) return;
+      au?.pause(); pushUndo('拆分'); d.rows.splice(i, 1, ...SP.applySplit(r, plan, o)); splitI = null; cuts = new Set(); resetOther(); draw();
       $(`.rowcard[data-i="${i}"]`, root)?.scrollIntoView({ block: 'nearest' });
-      undoBar(`已把第 ${i + 1} 句拆成 ${plan.pieces.length} 句`, () => doUndo());
+      undoBar(`已把第 ${i + 1} 句拆成 ${plan.pieces.length} 句${o.how !== 'none' && o.how !== 'short' ? '，译文也已对应拆开' : ''}`, () => doUndo());
     };
   };
   const draw = () => {
     const missZh = d.rows.filter(r => r.en && !r.zh).length, missEn = d.rows.filter(r => !r.en && r.zh).length;
     root.innerHTML = `
     <header class="top"><h1>${d.fresh ? '核对转写结果' : d.editId ? '编辑句子' : '拆句预览'}</h1><span class="muted">共 ${d.rows.length} 句，可逐句修改、拆分、合并、删除</span></header>
-    ${d.fresh ? `<div class="note" id="asrNote">自动转写可能有错字、断句不准：点每句的 <b>▶ 原声</b> 听一遍核对，直接改文字；太长的句子可以 <b>✂拆分</b>（你点哪两个词之间就从哪里断），太碎的可以合并，没用的删除。改好后保存，就会生成句子、生词和练习。${d.asrInfo ? `<div class="muted small">${esc(d.asrInfo)}</div>` : ''}</div>` : ''}
+    ${d.fresh ? `<div class="note" id="asrNote">自动转写可能有错字、断句不准：点每句的 <b>▶ 原声</b> 听一遍核对，直接改文字；太长的句子可以 <b>✂拆分</b>（你点哪两个词之间就从哪里断，译文跟着分段），太碎的可以合并，没用的删除。改好后保存，就会生成句子、生词和练习。${d.asrInfo ? `<div class="muted small">${esc(d.asrInfo)}</div>` : ''}</div>` : ''}
     <div class="field"><label for="t">材料名称</label><input id="t" value="${esc(d.title)}" placeholder="例如：疼痛接诊对话"></div>
     <div class="field"><label for="tg">标签 / 场景（逗号分隔）</label><input id="tg" value="${esc(d.tags.join('，'))}" placeholder="诊所，接待">
       <div class="chips">${TAGS.map(t => `<button class="chip" data-tag="${t}">${t}</button>`).join('')}</div></div>
@@ -86,16 +141,16 @@ export async function render(root) {
   };
   const sync = () => {
     d.title = $('#t', root).value; d.tags = $('#tg', root).value.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean);
-    $$('.rowcard', root).forEach(c => { const r = d.rows[+c.dataset.i]; $$('[data-f]', c).forEach(el => { r[el.dataset.f] = el.value; }); });
+    $$('.rowcard', root).forEach(c => { const r = d.rows[+c.dataset.i]; $$('[data-f]', c).forEach(el => { if ((el.dataset.f === 'zh' || el.dataset.f === 'en') && r.trNew && r[el.dataset.f] !== el.value) delete r.trNew; r[el.dataset.f] = el.value; }); });
   };
   const bind = () => {
     $$('[data-tag]', root).forEach(b => b.onclick = () => { sync(); if (!d.tags.includes(b.dataset.tag)) d.tags.push(b.dataset.tag); draw(); });
-    $$('[data-del]', root).forEach(b => b.onclick = () => { sync(); if (splitI != null) { splitI = null; cuts = new Set(); } d.rows.splice(+b.closest('.rowcard').dataset.i, 1); draw(); });
+    $$('[data-del]', root).forEach(b => b.onclick = () => { sync(); if (splitI != null) { splitI = null; cuts = new Set(); resetOther(); } d.rows.splice(+b.closest('.rowcard').dataset.i, 1); draw(); });
     $$('[data-merge]', root).forEach(b => b.onclick = () => {
-      sync(); const i = +b.closest('.rowcard').dataset.i; pushUndo('合并'); if (splitI != null) { splitI = null; cuts = new Set(); }
+      sync(); const i = +b.closest('.rowcard').dataset.i; pushUndo('合并'); if (splitI != null) { splitI = null; cuts = new Set(); resetOther(); }
       d.rows.splice(i, 2, SP.mergeRows(d.rows[i], d.rows[i + 1])); draw();
     });
-    $$('[data-split]', root).forEach(b => b.onclick = () => { sync(); const i = +b.closest('.rowcard').dataset.i; if (splitI === i) { splitI = null; cuts = new Set(); draw(); return; } splitI = i; cuts = new Set(); draw(); ensurePauses(); $(`.rowcard[data-i="${i}"]`, root)?.scrollIntoView({ block: 'nearest' }); });
+    $$('[data-split]', root).forEach(b => b.onclick = () => { sync(); const i = +b.closest('.rowcard').dataset.i; resetOther(); if (splitI === i) { splitI = null; cuts = new Set(); draw(); return; } splitI = i; cuts = new Set(); draw(); ensurePauses(); $(`.rowcard[data-i="${i}"]`, root)?.scrollIntoView({ block: 'nearest' }); });
     if (splitI != null) { const card = $(`.rowcard[data-i="${splitI}"]`, root); if (card) bindSplit(card); }
     $('#undoStep', root)?.addEventListener('click', () => doUndo());
     $$('[data-seg]', root).forEach(b => b.onclick = () => { sync(); playSeg(d.rows[+b.closest('.rowcard').dataset.i], b); });
@@ -126,6 +181,7 @@ export async function render(root) {
       if (o && (o.en !== r.en || o.zh !== r.zh)) { delete base.tr; if (o.en !== r.en) { delete base.analysis; delete base.notes; } }
       const out = { ...base, id: r.id || db.newId(), speaker: r.speaker, en: r.en, zh: r.zh, ...(r.t0 != null ? { t0: r.t0, t1: r.t1 } : {}) };
       if (r.wt) out.wt = r.wt; else delete out.wt; // 逐词时间（以后再拆分用）
+      if (r.trNew) out.tr = r.trNew; delete out.trNew; // 拆分时各段重新翻译的：标“机器翻译，可改”
       return out;
     });
     if (d.audioId) m.audioId = d.audioId;

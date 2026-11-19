@@ -10,6 +10,11 @@ import { paragraphs } from '../structure.js';
 import { $, $$, esc, toast, hilite, go } from '../ui.js';
 
 const MODES = [['zh2en', '看中文写英文', '给中文，你写英文，逐词判分'], ['dict', '听写', '听一句，把听到的写下来，逐词判分'], ['mcq', '词义选择', '看生词在你原句里的样子，选中文意思']];
+// v1.6 以听、读、说、译为主（默写为辅）：每题自己选作答方式 选/说/译/写
+const DRILLS = [['mix', '🎯 听说读译综合（推荐）', '听 35% · 读 20% · 说 20% · 译 15% · 写 10%；每题自己选：选 / 说 / 译 / 写'],
+  ['listen', '🎧 听力', '听原声或朗读：选意思、选听到的英文，或复述'], ['read', '📖 阅读理解', '单句认读 + 篇章理解（材料里连续 2–4 句出理解题）：选意思/答问题，或大声读出来'],
+  ['speak', '🗣️ 口说跟读', '先听再跟读 / 看中文说英文，语音识别后模糊判分'], ['trans', '🔁 翻译', '英译中为主（也可中译英），说或写；有 AI 用 AI 判分']];
+const DRILL_NAME = Object.fromEntries(DRILLS.map(([k, t]) => [k, t.replace(/^\S+\s/, '').replace('（推荐）', '')]));
 const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 // 释义只在词义边界精简（不截断字、不留尾逗号），完整释义可展开
 const shortZh = z => S.briefAll(z).text;
@@ -35,6 +40,10 @@ export async function render(root, [scope = 'all'], params) {
   const sents = sentsOf(pool), sentsAll = sents; const cpoolAll = cpool;
   const menu = () => {
     root.innerHTML = `<header class="top"><a class="back" href="${backHref}">‹</a><h1>测验</h1><span class="muted">范围：${esc(title)}</span></header>
+      <p class="muted small qintro">成年人学英语，先要<b>听得懂、看得懂、认得出</b>，再<b>说得出</b>：这里以听、读、说、译为主，拼写默写只占少量。每题先选<b>不会 / 模糊 / 会 / 熟练</b>，再用你选的方式作答。</p>
+      <div class="list">${DRILLS.map(([k, t, d], x) => { const n = k === 'trans' ? sents.filter(s => s.zh).length + cpool.length : sents.length + cpool.length;
+        return `<button class="item modeb ${x === 0 ? 'primary-item' : ''}" data-m="${k}" ${n ? '' : 'disabled'}><b>${t}</b><span class="muted">${d} · 可用 ${n} 题</span></button>`; }).join('')}</div>
+      <h3 class="qsub">默写 / 单项（辅）</h3>
       <div class="list">${MODES.map(([k, t, d]) => {
         const n = k === 'zh2en' ? sents.filter(s => s.zh).length : k === 'dict' ? sents.length : cpool.length;
         return `<button class="item modeb" data-m="${k}" ${n ? '' : 'disabled'}><b>${t}</b><span class="muted">${d} · 可用 ${n} 题</span></button>`; }).join('')}</div>
@@ -43,6 +52,7 @@ export async function render(root, [scope = 'all'], params) {
     $$('.modeb', root).forEach(b => b.onclick = () => start(b.dataset.m));
   };
   async function start(mode) {
+    if (DRILL_NAME[mode]) return startDrill(mode);
     let qs; const sentMastered = id => P.isMastered(cards.find(c => c.type === 'sentence' && c.sentenceId === id));
     const sents = sentsAll.filter(s => !sentMastered(s.id)), cpool = cpoolAll.filter(c => !P.isMastered(c)); // 本轮/上一轮标成熟练的不再出
     if (mode === 'zh2en') qs = shuffle(sents.filter(s => s.zh)).slice(0, 10).map(s => ({ s }));
@@ -165,6 +175,33 @@ export async function render(root, [scope = 'all'], params) {
       $('#again', root).onclick = () => start(mode);
     }
     ask();
+  }
+  async function startDrill(task) {
+    const { runDrill, pickItems } = await import('./drillrun.js');
+    const sentMastered = id => P.isMastered(cards.find(c => c.type === 'sentence' && c.sentenceId === id));
+    const ss = sentsAll.filter(s => !sentMastered(s.id)), ws = cpoolAll.filter(c => !P.isMastered(c));
+    // 读：加篇章阅读理解（材料里连续 2–4 句）；单练“读”最多 3 段，综合 1 段
+    const D = await import('../drill.js'); const wantP = task === 'read' ? 3 : task === 'mix' ? 1 : 0;
+    const pas = wantP ? D.passages(pool.flatMap(m => (m.sentences || []).map(s => ({ ...s, materialId: m.id }))), { want: wantP }) : [];
+    const items = [...pickItems(task === 'trans' ? ss.filter(s => s.zh) : ss, ws, 10 - pas.length), ...pas].sort(() => Math.random() - 0.5);
+    if (!items.length) { toast('这个范围里没有可练的句子或生词'); return menu(); }
+    const poolS = sentsOf(mats.filter(m => !m.kind)).length >= 8 ? sentsOf(mats.filter(m => !m.kind)) : sentsAll; // 选择题干扰项：先用本范围，不够用全部材料
+    const dpool = [...sentsAll, ...poolS];
+    runDrill(root, { task, items, pool: dpool, cards, mats, title, heading: DRILL_NAME[task], onDone: res => drillSummary(task, res) });
+  }
+  function drillSummary(task, res) {
+    const first = res.filter(r => r.choice !== 'master'); const scored = first.map(r => r.choice === 'dunno' ? 0 : r.score ?? (r.ok ? 100 : 0));
+    const avg = scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : 0, wrong = first.filter(r => !r.ok);
+    const cnt = k => res.filter(r => r.choice === k).length;
+    if (progKey && pool[0]) db.materials.get(sid).then(mm => { if (!mm) return; mm.progress = mm.progress || { done: {}, last: null, quiz: {} }; mm.progress.quiz = mm.progress.quiz || {}; mm.progress.quiz[progKey] = Math.max(avg, mm.progress.quiz[progKey] ?? 0); db.materials.save(mm); });
+    const TK = { listen: '🎧 听', read: '📖 读', speak: '🗣️ 说', trans: '🔁 译', write: '✍️ 写' }; const MZ = { choose: '选', say: '说', trans: '译', write: '写' };
+    const by = Object.keys(TK).map(k => [k, first.filter(r => r.task === k)]).filter(([, a]) => a.length);
+    root.innerHTML = `<header class="top"><h1>测验结果</h1><span class="muted">${esc(DRILL_NAME[task])} · ${esc(title)}</span></header><section class="rvcard"><div class="score ${avg >= 80 ? 'good' : avg >= 50 ? 'mid' : 'low'}"><b>${avg}</b> 分</div><p>答对 ${first.length - wrong.length} / ${first.length} 题</p>
+      <p class="muted small">不会 ${cnt('dunno')} · 模糊 ${cnt('fuzzy')} · 会 ${cnt('know')} · 熟练 ${cnt('master')}（熟练的不计分、以后不再出现）</p></section>
+      <h2>听 · 读 · 说 · 译 · 写</h2><div class="skilltab">${by.map(([k, a]) => `<div class="sk"><b>${TK[k]}</b><span>${a.filter(r => r.ok).length}/${a.length} 对</span><span class="muted small">${[...new Set(a.map(r => MZ[r.mode]))].join('/')}</span></div>`).join('')}</div>
+      ${wrong.length ? `<h2>需要再练的</h2><div class="list">${wrong.map(r => `<div class="item"><b>${esc(r.it.en)} <span class="tag">${P.CHOICE_ZH[r.choice]}</span></b><span class="muted">${esc(r.it.zh)}</span></div>`).join('')}</div><p class="muted small">这些都已自动加入复习：不会/会但答错 → 明天，模糊答错 → 3 天后${res.some(r => r.it.kind === 'passage') ? '（篇章题只记成绩，不单独排复习）' : ''}。</p>` : '<p class="muted">全部答对，漂亮！</p>'}
+      <div class="row gap"><button class="btn" id="again">再来一轮</button><a class="btn" href="#/">首页</a></div>`;
+    $('#again', root).onclick = () => startDrill(task);
   }
   if (params?.m) start(params.m); else menu();
 }
