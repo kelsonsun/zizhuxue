@@ -1,5 +1,5 @@
 {
- "version": "52ac987188",
+ "version": "efa61564ff",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -23,6 +23,9 @@
   "js/pdfbook.js",
   "js/practice.js",
   "js/recorder.js",
+  "js/rootbox.js",
+  "js/rootdata.js",
+  "js/roots.js",
   "js/sense.js",
   "js/sm2.js",
   "js/speech.js",
@@ -49,6 +52,7 @@
   "js/views/library.js",
   "js/views/quiz.js",
   "js/views/review.js",
+  "js/views/roots.js",
   "js/views/settings.js",
   "manifest.webmanifest",
   "vendor/ECDICT-LICENSE.txt",
