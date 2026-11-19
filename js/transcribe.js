@@ -40,28 +40,15 @@ export function estimateLocal(modelKey, durSec, fileBytes = 0) {
   return { sec: durSec * sp.rtf, measured: sp.measured, rtf: sp.rtf, overTime: durSec > LIMITS.localMin[modelKey] * 60, overSize: fileBytes > LIMITS.fileMB * 1e6 };
 }
 
-// ---------- 解码：任何浏览器能播的音频/视频 → 16kHz 单声道 Float32 ----------
-const decodeWith = (ctx, buf) => new Promise((res, rej) => { const p = ctx.decodeAudioData(buf, res, rej); if (p?.then) p.then(res, rej); });
-export async function decodeToPcm(blob) {
-  const Off = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
-  if (!Off) throw new Error('这个浏览器不支持读取音频（缺少 Web Audio）');
-  const buf = await blob.arrayBuffer();
-  let ab;
-  try { ab = await decodeWith(new Off(1, 1, SR), buf); }
-  catch (e) {
-    try { ab = await decodeWith(new Off(1, 1, 44100), await blob.arrayBuffer()); } // 个别浏览器不支持 16kHz 的离线上下文
-    catch { throw new Error('读不出这个文件的声音：可能没有声音轨，或格式浏览器不支持（如 amr、wma）。请转成 mp3 / m4a / mp4 后再试。'); }
-  }
-  let pcm;
-  if (ab.sampleRate === SR && ab.numberOfChannels === 1) pcm = ab.getChannelData(0);
-  else if (ab.sampleRate === SR) { pcm = new Float32Array(ab.length); for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < d.length; i++) pcm[i] += d[i] / ab.numberOfChannels; } }
-  else { // 重采样 + 混成单声道
-    const off = new Off(1, Math.ceil(ab.duration * SR), SR); const src = off.createBufferSource(); src.buffer = ab; src.connect(off.destination); src.start();
-    pcm = (await off.startRendering()).getChannelData(0);
-  }
-  if (!pcm.length) throw new Error('这个文件里没有声音');
-  return pcm;
+// ---------- 解码：任何录音/视频 → 16kHz 单声道 Float32（分层：拆 MP4/MOV/3GP 只取声音轨 → 整段解码 → 播放一遍录下来），见 extract.js ----------
+/** 返回 {pcm, info}；onProgress({stage, ratio, eta, text})；失败抛 ExtractError（code: NO_AUDIO / UNSUPPORTED / NEED_TAP…，message 是给用户看的中文） */
+export async function readAudio(blob, opts = {}) {
+  const X = await import('./extract.js');
+  const r = await X.extract(blob, opts);
+  if (!r.pcm?.length) throw new X.ExtractError('这个文件里没有声音', 'NO_AUDIO', r.info);
+  return r;
 }
+export async function decodeToPcm(blob, opts) { return (await readAudio(blob, opts)).pcm; }
 
 // ---------- 切段：在最安静的地方切，避免把一个词切成两半 ----------
 const rms = (pcm, a, b) => { let s = 0; for (let i = a; i < b; i++) s += pcm[i] * pcm[i]; return Math.sqrt(s / Math.max(1, b - a)); };
@@ -89,36 +76,155 @@ export function encodeWav(pcm, sr = SR) {
 // ---------- 转写结果 → 句子（带原声时间段） ----------
 const NOISE = /\[(?:BLANK_AUDIO|MUSIC|NOISE|SILENCE|INAUDIBLE)[^\]]*\]|\((?:music|applause|laughs?|laughter|silence|inaudible|noise)[^)]*\)|♪+/gi;
 export const cleanText = t => String(t || '').replace(NOISE, ' ').replace(/\s+/g, ' ').trim();
+// 断句规则（v1.4.1，kelson：语音备忘录转写出来是一整块）：
+//  ① 有句号/问号/叹号就按标点断；② 没有或很少标点时，按说话的停顿（从声音里测出的静音段）断；
+//  ③ 再长也不超过 约 20 个词 / 12 秒（中文约 32 个字）：在最长的停顿、逗号、连接词（and/but/so…、然后/但是/所以…）处切；
+//  ④ 轻度补标点：句首大写、i → I，句末补 . 或 ?（中文补 。或 ？）。每句都有自己的起止时间，可单独回放原声。
+const FRAME = 0.02;
+/** 从声音里找停顿：返回 [{a, b}]（秒），只算 ≥ minGap 秒的安静段。阈值按这段录音自己的底噪和音量自动定。 */
+export function findPauses(pcm, { sr = SR, minGap = 0.2 } = {}) {
+  if (!pcm?.length) return [];
+  const n = Math.floor(pcm.length / (sr * FRAME)), w = Math.floor(sr * FRAME), db = new Float32Array(n);
+  for (let f = 0; f < n; f++) { let s = 0; for (let i = f * w; i < (f + 1) * w; i++) s += pcm[i] * pcm[i]; db[f] = 10 * Math.log10(s / w + 1e-10); }
+  const sorted = Float32Array.from(db).sort(); const q = p => sorted[Math.min(n - 1, Math.floor(p * n))];
+  const floor = q(0.1), loud = q(0.95); if (loud - floor < 8) return []; // 几乎没有起伏（持续噪音/音乐），测不出停顿
+  const thr = floor + Math.max(6, 0.3 * (loud - floor));
+  const out = []; let st = -1;
+  for (let f = 0; f <= n; f++) {
+    const quiet = f < n && db[f] < thr;
+    if (quiet && st < 0) st = f; else if (!quiet && st >= 0) { if ((f - st) * FRAME >= minGap) out.push({ a: +(st * FRAME).toFixed(2), b: +(f * FRAME).toFixed(2) }); st = -1; }
+  }
+  return out;
+}
+const CONJ_EN = /^(and|but|so|because|then|or|when|if|which|that's|while|after|before|although|though|also|actually|anyway|now|well|okay|ok|like)$/i;
+const CONJ_ZH = /^(然后|但是|可是|不过|所以|因为|而且|还有|就是|那么|如果|其实|另外|接着|后来|结果|那个)/;
+/** 一般不会在它后面停下来断句的词（冠词、介词、物主代词等） */
+const FUNC_END = /^(the|a|an|to|of|for|by|in|on|at|with|from|into|after|under|before|about|over|through|across|like|nor|her|his|my|your|our|their|its|and|or|but|as|very|so|that|this|is|was|were|are|be|had|has|have|would|could|should|will|shall|not|no|than|then|if|when|which|who|whose|what|i|she|he|they|we|you|it)$/i;
+/** 每个字之前的“说话量”：英语按每个词的音节数（元音组）估，中文每字 1 个音节；返回长度 n+1 的累计数组 */
+function speakWeights(t, zh) {
+  const W = new Float32Array(t.length + 1); const per = new Float32Array(t.length);
+  const re = zh ? /[\u3400-\u9fff]|[A-Za-z0-9']+/g : /[A-Za-z0-9'’]+|[^\s]/g; let m;
+  while ((m = re.exec(t))) {
+    const w = m[0]; let syl;
+    if (/[\u3400-\u9fff]/.test(w)) syl = 1;
+    else if (/^\d+$/.test(w)) syl = 1.5 * w.length;
+    else if (/[A-Za-z]/.test(w)) { syl = (w.toLowerCase().replace(/e$/, '').match(/[aeiouy]+/g) || []).length || 1; syl += 0.3; }
+    else syl = 0;
+    for (let i = 0; i < w.length; i++) per[m.index + i] = syl / w.length;
+  }
+  for (let i = 0; i < t.length; i++) W[i + 1] = W[i] + per[i];
+  return W;
+}
+const WH = /^(what|where|when|why|who|whose|how)$/i, AUX = /^(is|are|am|was|were|do|does|did|can|could|would|will|should|shall|have|has|had|may|might|must|isn't|aren't|wasn't|weren't|don't|doesn't|didn't|can't|couldn't|won't|wouldn't|shouldn't|haven't|hasn't)$/i, PRON = /^(i|you|we|they|he|she|it|there|this|that|these|those|the|a|an|my|your|our|his|her|their|anyone|anybody|someone|somebody|everyone)$/i;
+/** 像不像问句（只看开头几个词，宁可少判）：What time should I…、How are you…、Do you…、Is it… */
+const isQuestion = s => { const w = s.toLowerCase().replace(/[^a-z'’\s]/g, ' ').split(/\s+/).filter(Boolean); return (WH.test(w[0] || '') && (AUX.test(w[1] || '') || AUX.test(w[2] || '') || /'s$/.test(w[0]))) || (AUX.test(w[0] || '') && PRON.test(w[1] || '')); };
+const isCjk = ch => /[\u3400-\u9fff]/.test(ch);
+/** 轻度补标点和大小写（只补缺的，不改用户/识别已有的标点） */
+export function tidySentence(s, zh = false) {
+  s = s.trim().replace(/[,，、;；:：\s]+$/, '');
+  if (!s) return s;
+  if (zh) { s = s.replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, '$1，'); return /[。！？!?…”"）)]$/.test(s) ? s : s + (/(吗|呢|吧|么|嘛)$/.test(s) ? '？' : '。'); } // 中文句中的空格（识别结果常用来代替标点）换成逗号
+  s = s.replace(/\bi\b(?=$|[\s'’,.!?])/g, 'I').replace(/^(["'“‘(]?)([a-z])/, (m, q, c) => q + c.toUpperCase());
+  if (!/[.!?…]["'”’)\]]*$/.test(s)) s += isQuestion(s) ? '?' : '.';
+  return s;
+}
 /**
- * segs: [{text, t0, t1}]（秒，绝对时间）。把各段文字连起来按句子重新切分，每句的起止时间按字符在段内线性插值。
+ * segs: [{text, t0, t1, words?: [{t0, t1}]}]（秒，绝对时间）。pcm（16kHz，可选）用来测停顿、让字的时间只落在有声音的地方。
  * 返回 [{en, zh, t0, t1}]；中文转写（AI 接口可能识别出中文）放进 zh。
  */
-export function segmentsToRows(segs, { pad = 0.15 } = {}) {
-  let text = ''; const times = []; // times[i] = 第 i 个字符的时间
+export function segmentsToRows(segs, { pad = 0.15, pcm = null, sr = SR, maxWords = 20, maxSec = 12, maxZh = 32 } = {}) {
+  const gaps = pcm ? findPauses(pcm, { sr }) : [];
+  // 1) 把各段连成一串文字，给每个字符一个时间。段内只在“有声音的时间”里按字数分配（停顿里不放字）；
+  //    段内每个停顿按“剩下的字 / 剩下的有声时间”推算落在哪个词前面，就在那里重新对齐（误差不会越积越大）
+  let text = ''; const times = []; const segEnd = new Set(); const wordTimes = []; const anchored = new Map(); const used = new Set();
+  const zhAll = lang(segs.map(g => g.text || '').join(' ')) === 'zh';
+  const starter = zhAll ? (w => CONJ_ZH.test(w) || /^[我你他她它这那]/.test(w)) : (w => CONJ_EN.test(w) || /^(i|i'm|we|she|he|they|you|my|what|how|why|where|who|please|let's|yes|no)$/i.test(w));
   for (const g of segs) {
     const t = cleanText(g.text); if (!t || g.t0 == null) continue;
     const t1 = g.t1 != null && g.t1 > g.t0 ? g.t1 : g.t0 + Math.max(1, t.length / 15);
     if (text) { text += ' '; times.push(g.t0); }
-    for (let i = 0; i < t.length; i++) times.push(g.t0 + (t1 - g.t0) * (i / Math.max(1, t.length - 1)));
-    text += t;
+    const base = text.length, n = t.length; const W = speakWeights(t, zhAll); // W[i]：第 i 个字之前要“说”的量（按音节估，比按字母数准）
+    const voiced = []; let cur = g.t0; const inner = [];
+    for (const p of gaps) { if (p.b <= g.t0 || p.a >= t1) continue; if (p.a > cur) voiced.push([cur, p.a]); if (p.a > g.t0 + 0.05 && p.b < t1 - 0.05) inner.push(p); cur = Math.max(cur, p.b); }
+    if (cur < t1) voiced.push([cur, t1]);
+    const vTot = voiced.reduce((x, [u, v]) => x + v - u, 0);
+    const useV = gaps.length && vTot >= 0.3 * (t1 - g.t0);
+    const vAt = tt => { let v = 0; for (const [u, w] of voiced) { if (tt <= u) break; v += Math.min(tt, w) - u; } return v; }; // 时间 → 之前的有声时长
+    const tAt = v => { if (!useV) return g.t0 + (t1 - g.t0) * v / Math.max(1e-6, vTot); for (const [u, w] of voiced) { if (v <= w - u) return u + v; v -= w - u; } return t1; };
+    // 段内的词边界（下一个词第一个字的位置）
+    const starts = []; const wre = zhAll ? /[\u3400-\u9fff]|[^\s\u3400-\u9fff]+/g : /\S+/g; let mm; while ((mm = wre.exec(t))) if (mm.index > 0) starts.push({ i: mm.index, w: mm[0], prev: t.slice(0, mm.index).trimEnd().slice(-1), pw: (t.slice(0, mm.index).trimEnd().match(/[\p{L}']+$/u) || [''])[0] });
+    const anchors = [[0, 0, 0]]; const Wn = W[n];
+    if (useV) for (const p of inner) {
+      if (p.b - p.a < 0.25) continue;
+      const [w0, v0] = anchors[anchors.length - 1]; const vg = vAt(p.a); if (vg <= v0) continue;
+      const rate = (Wn - w0) / Math.max(1e-6, vTot - v0); const pred = w0 + (vg - v0) * rate;
+      let best = null, bc = Infinity;
+      for (const st of starts) { if (W[st.i] <= w0) continue; const d = Math.abs(W[st.i] - pred) / rate; const bonus = (/[.!?。！？,，;；]/.test(st.prev) ? 0.35 : 0) + (starter(st.w.replace(/[^\p{L}']/gu, '')) ? 0.15 : 0) - (FUNC_END.test(st.pw || '') ? 0.2 : 0); const c = d - bonus; if (c < bc) { bc = c; best = st; } }
+      if (best && bc < 1.0) { anchors.push([W[best.i], vg, best.i]); anchored.set(base + best.i, p); used.add(p); }
+    }
+    anchors.push([Wn, vTot, n]);
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      while (k < anchors.length - 2 && i >= anchors[k + 1][2]) k++;
+      const [wa, va] = anchors[k], [wb, vb] = anchors[k + 1];
+      // 锚点处：前一个字落在停顿前，后一个字落在停顿后
+      const v = wb > wa ? va + (vb - va) * (W[i] - wa) / (wb - wa) : va;
+      times.push(tAt(i === anchors[k][2] && k > 0 ? va + 1e-4 : Math.min(v, vb - (i < n - 1 ? 1e-4 : 0))));
+    }
+    text += t; segEnd.add(text.length - 1);
+    if (g.words?.length) wordTimes.push({ base, text: t, words: g.words });
   }
   if (!text) return [];
-  const zh = lang(text) === 'zh'; const parts = zh ? splitChinese(text) : splitEnglish(text);
-  const rows = []; let cur = 0;
-  for (const p of parts) {
-    let a = text.indexOf(p, cur); if (a < 0) a = cur; const b = Math.min(text.length - 1, a + p.length - 1); cur = b + 1;
-    rows.push({ en: zh ? '' : p, zh: zh ? p : '', t0: times[a], t1: times[b] });
+  const zh = zhAll;
+  // 2) 切成词（中文按字，英文按空格），每个词有起止时间
+  const toks = []; const re = zh ? /[\u3400-\u9fff][，。！？、；：,.!?;:”’」』）)…]*|[^\s\u3400-\u9fff]+/g : /\S+/g; let m;
+  while ((m = re.exec(text))) toks.push({ a: m.index, b: m.index + m[0].length - 1, s: m[0], t0: times[m.index], t1: times[m.index + m[0].length - 1] });
+  // AI 接口给了逐词时间（whisper-1 的 timestamp_granularities=word）且词数对得上时，用精确时间
+  for (const wt of wordTimes) { const inSeg = toks.filter(k => k.a >= wt.base && k.b < wt.base + wt.text.length); if (inSeg.length === wt.words.length) inSeg.forEach((k, i) => { k.t0 = wt.words[i].t0; k.t1 = wt.words[i].t1; k.exact = true; }); }
+  if (!toks.length) return [];
+  // 3) 词与词之间的“切点”特征：句末标点、停顿长度、逗号、连接词、识别分段的边界
+  const B = toks.slice(0, -1).map((k, j) => {
+    const nx = toks[j + 1]; const end = k.s;
+    return { strong: zh ? /[。！？!?…]["”’」』）)]*$/.test(end) : /[.!?…]["'”’)\]]*$/.test(end) && !/^(mr|mrs|ms|dr|st|vs|etc|e\.g|i\.e)\.$/i.test(end) && /^["'“‘(\[]?[A-Z0-9]/.test(nx.s),
+      comma: /[,，、;；:：]$/.test(end) || (zh && /\s/.test(text.slice(k.b + 1, nx.a)) && isCjk(text[k.b]) && isCjk(text[nx.a])), // 中文识别结果常用空格代替标点
+      zsp: zh && /\s/.test(text.slice(k.b + 1, nx.a)) && isCjk(text[k.b]) && isCjk(text[nx.a]), conj: zh ? CONJ_ZH.test(text.slice(nx.a, nx.a + 2)) : CONJ_EN.test(nx.s.replace(/[^a-z'’]/gi, '')),
+      seg: [...Array(nx.a - k.b).keys()].some(d => segEnd.has(k.b + d)), pause: k.exact && nx.exact ? Math.max(0, nx.t0 - k.t1) : 0, gap: null }; // 插值出来的时间差不算停顿；停顿只信声音里测到的或逐词时间
+  });
+  // 测到的停顿落在哪个切点（按时间找最近的词边界）
+  for (let j = 0; j < B.length; j++) { const p = anchored.get(toks[j + 1].a); if (p) { B[j].gap = p; B[j].pause = Math.max(B[j].pause, p.b - p.a); } }
+  for (const p of gaps) { // 段与段之间的停顿：找时间最近的词边界
+    if (p.b - p.a < 0.25 || used.has(p)) continue; const mid = (p.a + p.b) / 2; let best = -1, bd = Infinity;
+    for (let j = 0; j < B.length; j++) { const d = Math.abs((toks[j].t1 + toks[j + 1].t0) / 2 - mid); if (d < bd) { bd = d; best = j; } }
+    if (best >= 0 && bd < 1.2 && (!B[best].gap || p.b - p.a > B[best].gap.b - B[best].gap.a)) { B[best].gap = p; B[best].pause = Math.max(B[best].pause, p.b - p.a); }
   }
-  // 太长（> 25 秒）的“句子”（转写没有标点时）按原始分段再拆开
-  const out = [];
-  for (const r of rows) {
-    if (r.t1 - r.t0 <= 25 || zh) { out.push(r); continue; }
-    const inside = segs.filter(g => g.t0 >= r.t0 - 0.01 && g.t0 < r.t1 && cleanText(g.text));
-    if (inside.length < 2) { out.push(r); continue; }
-    for (const g of inside) out.push({ en: cleanText(g.text), zh: '', t0: g.t0, t1: Math.min(g.t1 ?? r.t1, r.t1) });
+  const unit = zh ? 1 : 1, minStrong = 1, minPause = zh ? 6 : 4, cap = zh ? maxZh : maxWords, minSide = zh ? 4 : 3;
+  const score = (j, a, e) => { const b = B[j]; const mid = (a + e) / 2; return (b.strong ? 3 : 0) + Math.min(1.5, b.pause) * 4 + (b.comma ? 1.2 : 0) + (b.conj ? 0.8 : 0) + (b.seg ? 0.6 : 0) - 0.4 * Math.abs(j - mid) / Math.max(1, e - a); };
+  // 4) 从前往后断句
+  const cuts = []; let st = 0;
+  for (let j = 0; j < B.length; j++) {
+    const len = (j - st + 1) * unit, dur = toks[j].t1 - toks[st].t0, b = B[j];
+    if (b.strong && len >= minStrong) { cuts.push(j); st = j + 1; continue; }
+    if (b.pause >= 0.55 && len >= minPause) { cuts.push(j); st = j + 1; continue; }
+    if (b.zsp && len >= 8) { cuts.push(j); st = j + 1; continue; }
+    if (len >= cap || (dur >= maxSec && len >= minPause * 2)) {
+      let best = -1, bs = -Infinity; const lo = st + minSide - 1;
+      for (let k = Math.max(lo, st); k <= j; k++) { const v = score(k, st, j); if (v > bs) { bs = v; best = k; } }
+      if (best < 0) best = j;
+      cuts.push(best); st = best + 1; j = best;
+    }
   }
-  out.forEach((r, i) => { r.t0 = +Math.max(0, r.t0 - pad, i ? out[i - 1].t1 - 0.05 : 0).toFixed(2); const nx = out[i + 1]; r.t1 = +(nx ? Math.min(r.t1 + 0.4, nx.t0) : r.t1 + 0.5).toFixed(2); if (r.t1 <= r.t0) r.t1 = +(r.t0 + 0.5).toFixed(2); });
-  return out;
+  // 最后剩一两个词又没有句末标点：并到上一句
+  if (cuts.length && toks.length - 1 - cuts[cuts.length - 1] < (zh ? 3 : 2) && !/[.!?。！？…]$/.test(toks[toks.length - 1].s)) cuts.pop();
+  const rows = []; let a = 0;
+  for (const c of [...cuts, toks.length - 1]) {
+    const s = text.slice(toks[a].a, toks[c].b + 1); const t = tidySentence(s, zh);
+    // 句子边界吸附到停顿：上一句到停顿开始，下一句从停顿结束
+    const gl = a > 0 ? B[a - 1].gap : null, gr = c < B.length ? B[c].gap : null;
+    rows.push({ en: zh ? '' : t, zh: zh ? t : '', t0: gl ? Math.max(toks[a].t0 - 0.6, gl.b - 0.1) : toks[a].t0, t1: gr ? Math.min(toks[c].t1 + 0.6, gr.a + 0.1) : toks[c].t1 });
+    a = c + 1;
+  }
+  rows.forEach((r, i) => { r.t0 = +Math.max(0, r.t0 - pad, i ? rows[i - 1].t1 - 0.05 : 0).toFixed(2); const nx = rows[i + 1]; r.t1 = +(nx ? Math.min(r.t1 + 0.3, nx.t0 - pad) : r.t1 + 0.5).toFixed(2); if (r.t1 <= r.t0) r.t1 = +(r.t0 + 0.5).toFixed(2); });
+  return rows;
 }
 
 // ---------- 引擎 ① 本机 Whisper（Web Worker） ----------
@@ -205,7 +311,7 @@ export async function transcribeApi(pcm, { onProgress = () => { }, signal } = {}
       if (wav.size > LIMITS.apiMB * 1e6) throw new Error('分段后仍超过 25MB（不应发生）');
       const send = async () => {
         const f = new FormData(); f.append('file', wav, `part${i + 1}.wav`); f.append('model', model);
-        f.append('response_format', seg ? 'verbose_json' : 'json'); if (seg) f.append('timestamp_granularities[]', 'segment');
+        f.append('response_format', seg ? 'verbose_json' : 'json'); if (seg) { f.append('timestamp_granularities[]', 'segment'); f.append('timestamp_granularities[]', 'word'); } // 逐词时间让断句更准
         return postForm('/audio/transcriptions', f, { signal, onUpload: u => onProgress({ phase: 'api', done, total, chunk: i + 1, chunks: chunks.length, upload: u, elapsed: (performance.now() - t0) / 1000, text }) });
       };
       let r = await send();
@@ -217,8 +323,10 @@ export async function transcribeApi(pcm, { onProgress = () => { }, signal } = {}
         throw e;
       }
       const j = r.json || {}; const off = c.s / SR;
-      if (Array.isArray(j.segments) && j.segments.length) for (const s of j.segments) segs.push({ text: s.text, t0: off + (+s.start || 0), t1: off + (+s.end || sec) });
-      else if (j.text) segs.push({ text: j.text, t0: off, t1: off + sec });
+      const words = Array.isArray(j.words) ? j.words.map(w => ({ t0: off + (+w.start || 0), t1: off + (+w.end || 0) })) : [];
+      if (Array.isArray(j.segments) && j.segments.length) for (const s of j.segments) { const a = off + (+s.start || 0), b = off + (+s.end || sec); segs.push({ text: s.text, t0: a, t1: b, words: words.filter(w => w.t0 >= a - 0.01 && w.t0 < b) }); }
+      else if (j.text && words.length) segs.push({ text: j.text, t0: off, t1: off + sec, words });
+      else if (j.text) segs.push({ text: j.text, t0: off, t1: off + sec }); // 只有文字（如 gpt-4o-transcribe）：断句靠标点 + 声音里的停顿
       text = (text + ' ' + cleanText(j.text || '')).trim();
     }
     done += sec; const el = (performance.now() - t0) / 1000;
