@@ -16,7 +16,12 @@ export async function render(root, [id]) {
     <audio controls src="${url}" preload="metadata" class="asrau"></audio><div id="asr"><div class="card"><p>正在读取声音…</p></div></div>`;
   const box = $('#asr', root);
   let pcm = session.asr?.id === id ? session.asr.pcm : null;
-  if (!pcm) { try { pcm = await T.decodeToPcm(b.blob); session.asr = { id, pcm }; } catch (e) { box.innerHTML = `<div class="note err">${esc(e.message)}</div><a class="btn" href="#/lesson/${esc(id)}">‹ 回到材料</a>`; return; } }
+  if (!pcm) {
+    const { readWithUi } = await import('./audioread.js');
+    const r = await readWithUi(box, b.blob, { name: m.audioName || m.title });
+    if (!r) { box.insertAdjacentHTML('beforeend', `<a class="btn" href="#/lesson/${esc(id)}">‹ 回到材料</a>`); return; }
+    pcm = r.pcm; session.asr = { id, pcm };
+  }
   const dur = pcm.length / T.SR, size = b.blob.size;
   const hasAi = ai.isConfigured();
   let engine = hasAi ? 'api' : 'local', mk = T.LOCAL_MODELS[localStorage.getItem(PREF)] ? localStorage.getItem(PREF) : T.DEFAULT_LOCAL;
@@ -76,7 +81,8 @@ export async function render(root, [id]) {
     };
     try {
       const r = engine === 'api' ? await T.transcribeApi(pcm, { onProgress: onP, signal: sig }) : await T.transcribeLocal(pcm, { modelKey: mk, onProgress: onP, signal: sig });
-      const rows = T.segmentsToRows(r.segs);
+      if (typeof globalThis.__zzxTestSegs === 'function') r.segs = globalThis.__zzxTestSegs(r.segs); // 测试钩子：模拟“没有标点的长段”等识别结果
+      const rows = T.segmentsToRows(r.segs, { pcm }); // 按标点 + 声音里的停顿 + 长度上限断句，每句有自己的时间
       const sec = (performance.now() - t0) / 1000;
       if (!rows.length) return choose('没有听出内容：可能是静音、音乐，或不是英语（本机转写只识别英语）。可以换一段，或自己边听边打。');
       const mm = await db.materials.get(id);

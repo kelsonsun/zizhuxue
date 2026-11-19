@@ -87,7 +87,7 @@ export async function render(root, _a, params) {
 function audioPanel(p) {
   p.innerHTML = `<p class="muted">用身边真实的英语声音来学：现场录一段，或选手机里的录音、视频。软件自动转成文字，生成句子、生词和练习，每句都能回放原声跟读。</p>
     <div class="grid2 audbtns"><button class="btn primary big" id="recBtn">🎙 现场录音</button>
-      <label class="btn big" id="pickBtn"><input type="file" id="aud" accept="audio/*,video/*,.mp3,.m4a,.aac,.wav,.ogg,.opus,.webm,.mp4,.mov,.m4v,.3gp" hidden>📁 选择录音/视频</label></div>
+      <label class="btn big" id="pickBtn"><input type="file" id="aud" accept="audio/*,video/*,.mp3,.m4a,.aac,.wav,.ogg,.opus,.webm,.mp4,.mov,.m4v,.3gp,.amr" hidden>📁 选择录音/视频</label></div>
     <div id="recbox"></div><div id="st" role="status"></div>
     <ul class="muted small tips"><li>手机相册里的视频：点「选择录音/视频」→「照片图库」（安卓选「相册」或「图库」）。</li>
       <li>苹果「语音备忘录」的录音：在语音备忘录里点这条录音 →「…」→「分享」→「存储到“文件”」，再回来点「选择录音/视频」→「浏览」选它。</li></ul>`;
@@ -117,21 +117,24 @@ async function recordFlow(p) {
 }
 /** 读出声音（视频也只取声音）→ 存原声 → 去转写页 */
 async function takeAudio(p, file, name, { recorded = false } = {}) {
-  const T = await import('../transcribe.js'); const st = $('#st', p);
-  const mb = file.size / 1e6, isVideo = /^video\//.test(file.type) || (!file.type && /\.(mp4|mov|m4v|3gp)$/i.test(file.name));
-  if (mb > T.LIMITS.fileMB && !await confirmDlg(`这个文件有 ${Math.round(mb)} MB，超过建议的 ${T.LIMITS.fileMB} MB：手机可能内存不够，读取中途退出。建议先剪短（只留要学的部分）。仍然继续吗？`, { ok: '继续' })) return;
-  const t0 = Date.now(); st.innerHTML = `<div class="card"><b>正在读取${isVideo ? '视频里的' : ''}声音…</b> <span class="muted small">${esc(file.name)} · ${T.fmtMB(file.size)}</span><div class="muted small" id="rdt">只在本机读取，不上传。</div></div>`;
-  const tick = setInterval(() => { const x = $('#rdt', st); if (x) x.textContent = `只在本机读取，不上传。已用 ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 1000);
-  let pcm;
-  try { pcm = await T.decodeToPcm(file); }
-  catch (e) { clearInterval(tick); st.innerHTML = `<div class="note err">${esc(e.message)}</div>`; return; }
-  clearInterval(tick);
+  const T = await import('../transcribe.js'); const X = await import('../extract.js'); const st = $('#st', p);
+  const kind = await X.sniff(file); // 按文件内容判断（相册给的文件常常没有类型，或扩展名是大写 .MOV）
+  let isVideo = /^video\//.test(file.type) || /\.(mp4|mov|m4v|3gp|3g2|qt)$/i.test(file.name);
+  const mb = file.size / 1e6;
+  // MP4/MOV/3GP 只取声音轨、分批读，几百 MB 的视频也不占多少内存；其他格式要整段读进内存，才提醒
+  if (kind !== 'isobmff' && mb > T.LIMITS.fileMB && !await confirmDlg(`这个文件有 ${Math.round(mb)} MB，超过建议的 ${T.LIMITS.fileMB} MB：手机可能内存不够，读取中途退出。建议先剪短（只留要学的部分）。仍然继续吗？`, { ok: '继续' })) return;
+  const { readWithUi } = await import('./audioread.js');
+  const r = await readWithUi(st, file, { name: file.name, isVideo });
+  if (!r) return;
+  const pcm = r.pcm; if (r.info?.hasVideo != null) isVideo = r.info.hasVideo;
   const id = db.newId();
   // 视频只保留声音（16kHz 单声道 WAV，约 1.9 MB/分钟），不把几百 MB 的视频塞进本机数据库
-  const blob = isVideo ? T.encodeWav(pcm) : file;
+  // 只有浏览器能直接播放的录音才存原文件（回放「原声」要用）；AMR 等用自带解码器读出的，也存成 WAV
+  const playable = r.info?.method === 'decode' || (r.info?.method === 'demux' && /AAC|MP3/.test(r.info.used || ''));
+  const blob = isVideo || !playable ? T.encodeWav(pcm) : file;
   try { await db.blobs.set('audio:' + id, blob); }
-  catch (e) { st.innerHTML = `<div class="note err">保存录音失败：${esc(e.message)}（可能是手机存储空间不够）</div>`; return; }
-  const m = { id, title: name.replace(/\.[^.]+$/, ''), tags: [recorded ? '现场录音' : isVideo ? '视频' : '录音'], source: 'audio', audioName: file.name, duration: +(pcm.length / T.SR).toFixed(1), fromVideo: isVideo || undefined, sentences: [] };
+  catch (e) { st.innerHTML = `<div class="note err">保存录音失败：${esc(e?.message || e?.name || '浏览器不让存')}（可能是手机存储空间不够）</div>`; return; }
+  const m = { id, title: name.replace(/\.[^.]+$/, ''), tags: [recorded ? '现场录音' : isVideo ? '视频' : '录音'], source: 'audio', audioName: file.name, duration: +(pcm.length / T.SR).toFixed(1), fromVideo: isVideo || undefined, audioVia: [r.info?.method, r.info?.used].filter(Boolean).join(' ') || undefined, sentences: [] };
   await db.materials.save(m); session.asr = { id, pcm }; go('#/asr/' + id);
 }
 
