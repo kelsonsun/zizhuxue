@@ -1,5 +1,5 @@
 {
- "version": "144f32f092",
+ "version": "ee9e8d21f9",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -10,6 +10,7 @@
   "icons/og-card.png",
   "index.html",
   "js/ai.js",
+  "js/aiprompts.js",
   "js/app.js",
   "js/asr-worker.js",
   "js/bilingual.js",
