@@ -12,6 +12,11 @@ export function tokenize(text, zh = false) {
 /** 这句拆哪个字段：有英文拆英文，否则拆中文 */
 export const fieldOf = row => (row.en || '').trim() ? 'en' : 'zh';
 export const tokensOfRow = row => { const f = fieldOf(row); return tokenize(row[f] || '', f === 'zh'); };
+/** v1.9.3 中文也能拆：两边都有文字时，用户可选从英文拆还是从中文拆；中文材料（英文是译出来的）默认从中文拆 */
+export const splitFields = row => ['en', 'zh'].filter(f => (row[f] || '').trim());
+export const defaultField = row => row.orig === 'zh' && (row.zh || '').trim() ? 'zh' : fieldOf(row);
+/** 这句能不能拆：任一边有 2 个以上的词 / 字 */
+export const canSplit = row => splitFields(row).some(f => tokenize(row[f], f === 'zh').length >= 2);
 const syl = w => CJK.test(w) ? 1 : /^\d+$/.test(w) ? 1.5 * w.length : /[A-Za-z]/.test(w) ? ((w.toLowerCase().replace(/[^a-z]/g, '').replace(/e$/, '').match(/[aeiouy]+/g) || []).length || 1) + 0.3 : 0.2;
 /** 逐词时间是否还能用（文字改过、词数对不上就不用） */
 export const wtOk = (row, toks) => Array.isArray(row.wt) && row.wt.length === toks.length && row.wt.every(x => Array.isArray(x) && x.length === 2 && x[1] >= x[0]);
@@ -21,11 +26,11 @@ const r2 = x => +(+x).toFixed(2);
  * 按用户选的切点算出各段。cuts：在第 j 个词之后断开（0 起）。pauses：整段录音测到的停顿 [{a, b}]（秒）。
  * 返回 {field, toks, pieces:[{text, t0, t1, how, wt}]}；how：'word' 逐词时间 / 'pause' 对齐到停顿 / 'est' 按比例估算 / null 无时间。
  */
-export function planSplit(row, cuts, { pauses = [] } = {}) {
-  const field = fieldOf(row), zh = field === 'zh', text = row[field] || '', toks = tokenize(text, zh);
+export function planSplit(row, cuts, { pauses = [], field: want = null } = {}) {
+  const field = want && (row[want] || '').trim() ? want : fieldOf(row), zh = field === 'zh', text = row[field] || '', toks = tokenize(text, zh);
   cuts = [...new Set(cuts.map(Number))].filter(j => j >= 0 && j < toks.length - 1).sort((a, b) => a - b);
   const hasT = row.t0 != null && row.t1 != null && row.t1 > row.t0;
-  const wt = hasT && wtOk(row, toks) ? row.wt : null;
+  const wt = hasT && field === fieldOf(row) && wtOk(row, toks) ? row.wt : null; // 逐词时间属于英文（转写原文），从中文拆时不用
   const T0 = hasT ? +row.t0 : null, T1 = hasT ? +row.t1 : null;
   const inner = hasT ? (pauses || []).filter(p => p.b > T0 + 0.05 && p.a < T1 - 0.05 && p.b - p.a >= 0.12) : [];
   // 有声时间（去掉句内停顿）：比例估算只在有声的地方分配
@@ -127,7 +132,7 @@ export function applySplit(row, plan, other = planOther(row, plan)) {
   const of = other.field;
   return plan.pieces.map((p, i) => {
     const base = i === 0 ? { ...row } : { speaker: row.speaker || '' };
-    const r = { ...base, [plan.field]: p.text, [of]: other.texts[i] || '' };
+    const r = { ...base, [plan.field]: p.text, [of]: other.texts[i] || '' }; r._sp = 1; // 拆分出来的（草稿内标记，保存时去掉）：中英文已对应，不算“改过”
     if (String(other.how).startsWith('mt:')) r.trNew = String(other.how).slice(3); else if (row.tr && other.texts[i]) r.trNew = row.tr; else delete r.trNew; // 各段重新翻译：保存后标“机器翻译，可改”
     if (p.t0 != null) { r.t0 = p.t0; r.t1 = p.t1; }
     if (p.wt) r.wt = p.wt; else delete r.wt;
