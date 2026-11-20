@@ -1,5 +1,5 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '144f32f092';
+const VERSION = 'ee9e8d21f9';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
@@ -56,7 +56,7 @@ self.addEventListener('fetch', e => {
     e.respondWith((async () => { const c = await caches.open(ASR); const hit = await c.match(req.url); if (hit) return hit; const res = await fetch(req); if (res.ok) c.put(req.url, res.clone()); return res; })());
     return;
   }
-  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/v1/')) return; // v1.9.4 接口（如内置 AI 状态）不进缓存
   e.respondWith((async () => {
     const c = await caches.open(isVendor(url) ? VENDOR : CACHE);
     const hit = await c.match(req, { ignoreSearch: req.mode === 'navigate' });
