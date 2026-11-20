@@ -24,6 +24,8 @@ export async function render(root) {
   root.innerHTML = `
   <header class="top"><h1>我的</h1><button class="btn fbtop" id="fbTop" aria-label="反馈问题或提建议">🐞 反馈</button><span class="muted">设置、AI、备份、反馈</span></header>
   <section class="card fbcard" id="fbCard"><h2>反馈与建议</h2><div id="fbBox"></div></section>
+  <section class="card sharecard" id="shareCard"><h2>📣 分享给朋友</h2><p class="small">生成一张带二维码的分享卡片图：发微信、朋友圈、任何聊天软件都行，朋友长按识别或扫码就能打开。</p>
+    <div class="row gap wrap"><button class="btn primary" id="shareAppGo">🖼 生成分享卡片图</button><button class="btn" id="shareAppCopy">🔗 复制链接</button></div></section>
 
   <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${ai.isConfigured() ? '已配置' : '未配置'}</span></h2>
     ${help('说明：AI 接口怎么填、密钥存在哪', `<p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>`, 'hAi')}
@@ -182,6 +184,9 @@ export async function render(root) {
   fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
   E('#asr').onchange = e => saveSettings({ useAsr: e.target.checked });
   import('./unlock.js').then(U => U.mountCard(E('#licCard'))).catch(e => console.warn('license', e)); // v1.9 会员与激活
+  // v1.9.1 分享给朋友：本地画分享卡片图（带二维码）；复制链接
+  E('#shareAppGo').onclick = () => import('../sharecard.js').then(m => m.openShareCard()).catch(e => toast('生成分享图没成功：' + e.message));
+  E('#shareAppCopy').onclick = () => import('../sharecard.js').then(async m => toast(await m.copyLink() ? '已复制链接：' + m.SHARE_URL : '复制没成功：' + m.SHARE_URL));
   E('#exp').onclick = async () => { download(`自主学备份_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await db.exportAll(), null, 1)); toast('已导出（不含 AI 密钥）'); };
   const doImport = (mode) => async (e) => {
     const f = e.target.files[0]; if (!f) return;
