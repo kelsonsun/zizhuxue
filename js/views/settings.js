@@ -51,6 +51,7 @@ export async function render(root) {
     <button class="btn" id="tourAgain">🧭 重新观看新手引导</button></section>
 
   <section class="card" id="licCard"></section>
+  <section class="card" id="refCard"></section>
   <section class="card" id="remindCard"><h2>⏰ 学习提醒</h2>
     <label class="check switch"><input type="checkbox" id="remTog" ${settings.remindOn ? 'checked' : ''}> <b>每天按时提醒我学习</b></label>
     <div class="field"><label for="remAt">提醒时间</label><input type="time" id="remAt" value="${esc(settings.remindAt || '20:00')}" step="300"></div>
@@ -191,6 +192,7 @@ export async function render(root) {
   fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
   E('#asr').onchange = e => saveSettings({ useAsr: e.target.checked });
   import('./unlock.js').then(U => U.mountCard(E('#licCard'))).catch(e => console.warn('license', e)); // v1.9 会员与激活
+  import('./pay.js').then(U => U.mountRefCard(E('#refCard'))).catch(e => console.warn('referral', e)); // v1.10 好友推荐
   // v1.9.2 匿名使用统计开关
   import('../telemetry.js').then(T => { const c = E('#telOn'); if (!c) return; c.checked = T.enabled(); c.onchange = () => { T.setEnabled(c.checked); toast(c.checked ? '已开启匿名使用统计' : '已关闭匿名使用统计，不会再发'); }; }).catch(() => { });
   // v1.9.1 分享给朋友：本地画分享卡片图（带二维码）；复制链接

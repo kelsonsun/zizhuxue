@@ -2,6 +2,8 @@
 import * as db from '../db.js';
 import * as L from '../license.js';
 import * as B from '../billing.js';
+import * as PT from '../pricetable.js';
+import * as Pay from '../pay.js';
 import { $, esc, toast, download } from '../ui.js';
 
 const ONE = `一次 = 一段连续的学习，不限时长：不管做了多少组、学了多久都只算一次；停下超过 ${B.SESSION_GAP_MIN} 分钟（没有任何学习操作）再开始学，才算新的一次。这段学习里至少完成一组复习 / 测验 / 练习（${B.MIN_ANSWERS} 题以上）或学完课文一段才计入；只打开 App、查词、拍照、导入、看材料都不算。`;
@@ -16,11 +18,21 @@ export function statusLine(g) {
   if (!g.offer.enforce) return '免费使用';
   return g.locked ? `免费试用已用完（${g.uses} / ${g.uses} 次）` : `免费试用中：已用 ${g.used} / ${g.uses} 次，还剩 <b>${g.remaining}</b> 次${g.inSession ? '（这一次还没结束，可以接着学，不限时长）' : ''}`;
 }
-function pricesHtml(o) {
+function pricesHtml(o, region) {
   if (!o.showPrices) return o.store ? '<p class="muted small" id="storeNote">商店版的购买方式以商店页面为准。</p>' : '';
-  const rows = B.PRICES.map(p => `<li class="price" data-plan="${p.plan}"><b>${esc(p.name)}</b> <span class="pp">${p.price ? esc(p.price) + (p.period ? ' / ' + esc(p.period) : '') : '价格待定'}</span><br><span class="muted small">${esc(p.desc)}</span></li>`).join('');
-  const pay = o.showPay ? `${B.PAY.url ? `<a class="btn primary" id="payGo" href="${esc(B.PAY.url)}" target="_blank" rel="noopener">去购买</a>` : ''}${B.PAY.contact ? `<p id="payContact">购买 / 续费：${esc(B.PAY.contact)}</p>` : ''}` : '<p class="muted small" id="payTbd">购买方式即将公布。</p>';
-  return `<ul class="prices">${rows}</ul>${pay}<p class="muted small">${esc(B.PAY.note)}</p>`;
+  const filled = (B.PRICES || []).filter(p => p.price);
+  if (filled.length) {
+    const rows = B.PRICES.map(p => `<li class="price" data-plan="${esc(p.plan)}"><b>${esc(p.name)}</b>${p.price ? ` <span class="pp">${esc(p.price)}${p.period ? ' / ' + esc(p.period) : ''}</span>` : ''}${p.desc ? `<div class="muted small">${esc(p.desc)}</div>` : ''}</li>`).join('');
+    const pay = o.showPay ? `${B.PAY.url ? `<a class="btn primary" id="payGo" href="${esc(B.PAY.url)}" target="_blank" rel="noopener">去购买</a>` : ''}${B.PAY.contact ? `<p id="payContact">购买 / 续费：${esc(B.PAY.contact)}</p>` : ''}` : '<p class="muted small" id="payTbd">在线付款尚未开通。价格可以先看，付款由管理员登记后发放授权。</p>';
+    return `<ul class="prices">${rows}</ul>${pay}<p class="muted small">${esc(B.PAY.note)}</p><div class="row gap wrap"><a class="btn" href="#/pay" id="toPay">价格与优惠码</a><a class="btn" href="#/invite" id="toInvite">好友推荐</a></div>`;
+  }
+  const reg = region || Pay.suggestRegion() || 'CN';
+  const row = PT.rowOf(PT.DEFAULT_PRICES, reg);
+  const rows = `<li class="price" data-plan="year" id="priceYear"><b>年付</b> <span class="pp" id="ppYear">${esc(PT.displayPrice(row, 'year'))}</span></li><li class="price" data-plan="month" id="priceMonth"><b>月付</b> <span class="pp" id="ppMonth">${esc(PT.displayPrice(row, 'month'))}</span></li>`;
+  const noWeb = Pay.blockWebPay(reg);
+  const pay = noWeb ? '<p class="warn small" id="iosCnNote">中国大陆的 iOS 请在 App Store 内购买。应用内购买尚未开通，这里不会引导你去网页付款。</p>'
+    : (o.showPay ? `${B.PAY.url ? `<a class="btn primary" id="payGo" href="${esc(B.PAY.url)}" target="_blank" rel="noopener">去购买</a>` : ''}${B.PAY.contact ? `<p id="payContact">购买 / 续费：${esc(B.PAY.contact)}</p>` : ''}` : '<p class="muted small" id="payTbd">在线付款尚未开通（苹果 / Google Play / Stripe 都还没办）。价格可以先看，付款由管理员登记后发放授权。</p>');
+  return `<p class="muted small" id="regionNote">价格按商店地区显示，不按 IP 区分。当前：${esc(row.name)}</p><ul class="prices">${rows}</ul>${pay}<p class="muted small">${esc(B.PAY.note)}</p><div class="row gap wrap"><a class="btn" href="#/pay" id="toPay">价格与优惠码</a><a class="btn" href="#/invite" id="toInvite">好友推荐</a></div>`;
 }
 const codeForm = o => o.showCode ? `<label class="lbl" for="licCode">激活码</label><textarea id="licCode" rows="3" placeholder="ZZX1-…（整段粘贴，空格和横线没关系）" autocomplete="off" autocapitalize="characters" spellcheck="false"></textarea>
   <div class="row gap"><button class="btn primary" id="licGo">激活</button><span class="muted small" id="licMsg" role="status"></span></div>` : '';
