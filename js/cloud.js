@@ -37,6 +37,8 @@ export async function emailStart(url, email) { await checkServer(url); return ca
 export async function emailVerify(url, email, code) { return bound(url, await call(url, 'auth/email/verify', { email, code, deviceId: await db.deviceId(), deviceName: deviceName() })); }
 export async function pairClaim(url, code) { await checkServer(url); return bound(url, await call(url, 'pair/claim', { code, deviceId: await db.deviceId(), deviceName: deviceName() })); }
 export async function pairStart() { return authed(t => call(cfg.url, 'pair/start', {}, t)); }
+/** v1.9 授权 / 试用接口（已绑定时用；同一台同步服务器） */
+export async function api(path, body) { await load(); return authed(t => call(cfg.url, path, body, t)); }
 export async function devices() { return authed(t => call(cfg.url, 'devices', undefined, t)); }
 async function bound(url, tok) {
   await load();

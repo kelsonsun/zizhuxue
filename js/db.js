@@ -111,7 +111,7 @@ export const cards = {
 // 复习日志：只追加，每条有唯一 id 与设备 id，跨设备合并不冲突
 export const reviews = {
   all: () => getAll('reviews'),
-  async add(r) { const t = now(); const rec = { ...r, id: r.id || uid(), dev: await deviceId(), _f: {} }; for (const k of Object.keys(rec)) if (k !== '_f') rec._f[k] = t; await put('reviews', rec); await markDirty('reviews', rec.id); return rec; },
+  async add(r) { const t = now(); const rec = { ...r, id: r.id || uid(), dev: await deviceId(), _f: {} }; for (const k of Object.keys(rec)) if (k !== '_f') rec._f[k] = t; await put('reviews', rec); await markDirty('reviews', rec.id); globalThis.dispatchEvent?.(new Event('zzx-study')); return rec; }, // v1.9：答题 = 学习操作（延续这一次学习）
 };
 /** 本机匿名设备 ID：首次使用自动生成，不需要登录 */
 let devId = null;
@@ -146,6 +146,7 @@ export async function exportAll() {
     app: 'zizhuxue', version: 1, exportedAt: new Date().toISOString(),
     materials: await getAll('materials'), cards: await getAll('cards'), reviews: await getAll('reviews'),
     settings: await meta.get('settings', {}), tombstones: await meta.get('tombstones', []),
+    trial: await meta.get('trial', null), license: (await meta.get('license', null))?.code || null, // v1.9：试用记录和激活码跟着备份走（导入时次数取最大，清数据再导入也不会重置）
   };
 }
 export async function importAll(data, { mode = 'merge' } = {}) {
@@ -158,6 +159,9 @@ export async function importAll(data, { mode = 'merge' } = {}) {
   for (const c of data.cards) { const o = have.get('c' + c.id); if (!o || (c.updatedAt || 0) > (o.updatedAt || 0)) { await put('cards', c); nc++; } }
   if (mode === 'replace') for (const r of data.reviews || []) await put('reviews', { ...r, id: r.id || uid() });
   if (data.settings && mode === 'replace') await meta.set('settings', data.settings);
+  if (data.trial) { const cur = await meta.get('trial', null) || {}; await meta.set('trial', { ...cur, used: Math.max(+cur.used || 0, +data.trial.used || 0), last: Math.max(+cur.last || 0, +data.trial.last || 0), first: Math.min(...[cur.first, data.trial.first].filter(x => x > 0), Date.now()), log: cur.log || data.trial.log || [] }); }
+  if (data.license && !(await meta.get('license', null))?.code) await meta.set('license', { code: data.license, at: Date.now() });
   return { materials: nm, cards: nc };
 }
-export async function wipeAll() { for (const s of Object.keys(STORES)) if (s !== 'meta') await clear(s); const keep = ['deviceId', 'sync', 'ai', 'aiConfig']; for (const r of await getAll('meta')) if (!keep.includes(r.key)) await del('meta', r.key); }
+// v1.9：清空数据不清试用记录和激活码（trial / license / clockMax / licServer）
+export async function wipeAll() { for (const s of Object.keys(STORES)) if (s !== 'meta') await clear(s); const keep = ['deviceId', 'sync', 'ai', 'aiConfig', 'trial', 'license', 'clockMax', 'licServer']; for (const r of await getAll('meta')) if (!keep.includes(r.key)) await del('meta', r.key); }

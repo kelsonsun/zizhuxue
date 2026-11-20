@@ -27,9 +27,16 @@ const routes = {
   snap: () => import('./views/snap.js'),
   shared: () => import('./views/shared.js'),
   bilingual: () => import('./views/bilingual.js'),
+  unlock: () => import('./views/unlock.js'),
 };
 const TABS = [['', '今日', '🏠'], ['import', '导入', '➕'], ['library', '材料库', '📚'], ['review', '复习', '🔁'], ['me', '我的', '👤']];
 let cleanup = null, navSeq = 0;
+const LOCKED_VIEWS = new Set(['review', 'quiz', 'lesson']);
+// v1.9 学习操作（在复习 / 测验 / 练习 / 课文页点按、打字，或在播放原声 / 朗读）都延续“这一次学习”：停下超过 30 分钟再学才算新的一次
+let lastTouch = 0;
+const studyTouch = () => { if (!LOCKED_VIEWS.has(document.getElementById('app')?.dataset.view)) return; const n = Date.now(); if (n - lastTouch < 15000) return; lastTouch = n; import('./license.js').then(L => L.touch()).catch(() => { }); };
+addEventListener('pointerdown', studyTouch, true); addEventListener('keydown', studyTouch, true); addEventListener('zzx-study', () => { lastTouch = 0; studyTouch(); });
+setInterval(() => { if (globalThis.speechSynthesis?.speaking || [...document.querySelectorAll('audio, video')].some(m => !m.paused)) studyTouch(); }, 60000);
 export const onLeave = fn => { cleanup = fn; };
 
 // 路由渲染串行化：快速连续跳转时，旧页面较慢的异步渲染不会覆盖新页面
@@ -46,7 +53,9 @@ async function doRender(seq) {
   tts.cancel();
   session.trail = [...(session.trail || []), location.hash || '#/'].slice(-6); // 反馈里附上“之前去过的页面”
   const root = $('#app');
-  const loader = routes[name] ?? routes[''];
+  let loader = routes[name] ?? routes[''];
+  // v1.9 试用用完 / 会员到期：复习、测验、练习、学课文改去「会员与激活」页（材料、数据照样能看、能导出）
+  if (LOCKED_VIEWS.has(name)) { try { const g = await (await import('./license.js')).info(); if (seq !== navSeq) return; if (g.locked) { loader = routes.unlock; params.from = location.hash; if (name === 'lesson' && args[0]) params.id = args[0]; } } catch (e) { console.warn('license', e); } }
   const tab = { '': '', import: 'import', draft: 'import', asr: 'import', library: 'library', lesson: 'library', book: 'library', quiz: 'library', roots: 'library', bilingual: 'library', shared: 'import', review: 'review', me: 'me' }[name] ?? '';
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   root.scrollTop = 0; window.scrollTo(0, 0);
@@ -120,7 +129,7 @@ function setupUpdates() {
     apply();
   });
   navigator.serviceWorker.register(OFF.swUrl()).then(reg => {
-    const check = () => reg.update().catch(() => { });
+    const check = () => reg?.update?.().catch(() => { });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
     setInterval(check, 30 * 60 * 1000);
   }).catch(e => console.warn('SW', e));
@@ -143,6 +152,7 @@ async function boot() {
   // 云同步：未绑定时什么都不做；已绑定则后台自动同步，收到别的设备的改动后刷新当前页（正在做事时不打断）
   cloud.boot().catch(e => console.warn('sync', e));
   import('./remind.js').then(R => R.boot()).catch(e => console.warn('remind', e)); // v1.8 学习提醒：开着就按设置重新排好
+  import('./license.js').then(L => L.boot()).catch(e => console.warn('license', e)); // v1.9 试用次数 / 激活码 / 服务器对账
   import('./share.js').then(S => S.boot()).catch(e => console.warn('share', e));    // v1.8 安卓「分享到自主学」（App 里的 intent）
   addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
 }
