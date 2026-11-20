@@ -97,6 +97,7 @@ export async function openShareCard() {
   const { sheet, toast, download, esc } = await import('./ui.js');
   const s = sheet(`<h3>分享给朋友</h3><div id="scBox" class="center muted">生成中…</div>`, { cls: 'sharecardsheet' });
   const blob = await cardBlob(); const url = URL.createObjectURL(blob), name = '自主学_分享卡片.png';
+  import('./telemetry.js').then(T => T.track('share')).catch(() => { }); // v1.9.2 匿名统计
   const file = typeof File === 'function' ? new File([blob], name, { type: 'image/png' }) : null;
   const iOS = /iPhone|iPad/.test(navigator.userAgent);
   s.el.querySelector('#scBox').outerHTML = `<img id="scImg" class="shareimg sharecardimg" src="${url}" alt="自主学分享卡片图：扫码打开 ${esc(SHARE_URL)}" width="${CARD_W}" height="${blob.info.height}" data-bytes="${blob.size}">

@@ -51,6 +51,7 @@ const gotHtml = g => g && (g.s || g.d) ? `<div class="cgot" id="celebGot">${g.s 
  */
 export async function sessionDone({ kind = 'practice', key, title, n = 0, ok = 0, avg = null, lines = [], label }) {
   const pct = avg ?? (n ? Math.round(100 * ok / n) : null);
+  import('./telemetry.js').then(T => T.track(/^(quiz|drill):/.test(key || '') ? 'quiz' : /^review:/.test(key || '') ? 'review' : 'study')).catch(() => { }); // v1.9.2 匿名统计：完成学习 / 复习 / 测验
   try { await (await import('./license.js')).countUse({ kind: kind === 'unit' ? 'unit' : 'practice', n }); } catch (e) { console.warn('license', e); } // v1.9 试用按学习次数算
   const r = await P.grant({ kind, key, n, ok, label: label || title });
   const after = await P.afterProgress();

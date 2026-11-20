@@ -5,6 +5,7 @@
 import * as db from './db.js';
 import { APP_VERSION } from './version.js';
 import { FEEDBACK_EMAIL, SYNC_AVAILABLE } from './deploy.js';
+import { feedbackUrl } from './endpoint.js';
 
 export const TYPES = [['bug', '🐞 问题 / bug'], ['idea', '💡 建议'], ['other', '💬 其他']];
 export const TYPE_ZH = { bug: '问题/bug', idea: '建议', other: '其他' };
@@ -76,8 +77,9 @@ export async function remove(id) { await db.meta.set(KEY, (await list()).filter(
 export async function shotOf(id) { return (await db.blobs.get('fb:' + id).catch(() => null))?.blob || null; }
 // ---- 发到服务器（上线同步服务器以后） ----
 const blobToDataUrl = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
-/** 有没有可用的反馈服务器：部署时开了同步服务器（deploy.js），或这台设备绑定过同步服务器。返回接口地址或 '' */
+/** 有没有可用的反馈服务器：deploy.js 的 FEEDBACK_URL（v1.9.2，和云同步无关），或这台设备绑定过同步服务器，或部署时开了同步服务器。返回接口地址或 '' */
 export async function serverUrl() {
+  const f = feedbackUrl(); if (f) return f;
   const c = await db.meta.get('sync', null);
   if (c?.url) return new URL('feedback', c.url).href;
   if (SYNC_AVAILABLE) { const { defaultUrl } = await import('./cloud.js'); const u = defaultUrl(); return u ? new URL('feedback', u).href : ''; }

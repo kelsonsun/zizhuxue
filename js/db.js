@@ -78,7 +78,10 @@ async function saveSynced(store, rec) {
   const t = now(); const old = await get(store, rec.id);
   rec.updatedAt = t; if (!rec.created) rec.created = t;
   const stamped = stampChanges(old, rec, t); rec._f = stamped._f; delete rec._del;
-  await put(store, rec); await markDirty(store, rec.id); return rec;
+  await put(store, rec); await markDirty(store, rec.id);
+  // v1.9.2 匿名统计：新建了一份材料（导入成功）。示例材料、书的各章（整本书算一次）不算
+  if (store === 'materials' && (!old || old._del) && !rec.sample && !rec.bookId) globalThis.dispatchEvent?.(new Event('zzx-imported'));
+  return rec;
 }
 /** 撤销删除：把删除前的记录原样放回，所有字段重新打上“现在”的时间戳（晚于墓碑 → 各设备合并后都视为复活），并移除本机墓碑 */
 export async function restoreSynced(store, rec) {

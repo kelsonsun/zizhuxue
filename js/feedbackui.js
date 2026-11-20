@@ -23,7 +23,7 @@ export function openFeedback(prefill = {}, { onClose } = {}) {
     <div class="field"><label for="fbContact">联系方式（可选：微信 / 邮箱 / 手机，方便回复你）</label><input id="fbContact" maxlength="200" autocomplete="email" placeholder="可以不填"></div>
     <details class="fbenv"><summary>会自动附上的信息</summary><div class="muted small">版本 v${esc(env.version)} · ${esc(env.os)}${env.standalone ? '（主屏应用）' : ''} · ${esc(env.browser)} · 屏幕 ${esc(env.screen)}<br>当前页面：${esc(page)}</div></details>
     <button class="btn primary big" id="fbSave">保存并选择发送方式</button>
-    <p class="muted small">反馈先保存在这台设备上（「我的 → 反馈与建议」里能看到）。不会自动上传任何内容。</p>`, { onClose: () => { if (shotUrl) URL.revokeObjectURL(shotUrl); onClose?.(); } });
+    <p class="muted small">反馈先保存在这台设备上（「我的 → 反馈与建议」里能看到）。不点“直接发给开发者”就不会上传。</p>`, { onClose: () => { if (shotUrl) URL.revokeObjectURL(shotUrl); onClose?.(); } });
   const el = sh.el;
   $$('[data-ft]', el).forEach(b => b.onclick = () => { type = b.dataset.ft; $$('[data-ft]', el).forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); }); });
   $('#fbShot', el).onchange = async e => {
@@ -45,12 +45,12 @@ export async function sendPanel(el, fb, shotFile = null) {
   const srv = await F.serverUrl(); const canShare = !!navigator.share;
   el.innerHTML = `<h3>✅ 已保存在本机</h3><p class="muted small">选一种方式发出去（可以都用）：</p>
     <div class="fbsend">
-      <a class="btn primary" id="fbMail" href="${esc(F.mailto(fb))}">📧 用邮件发送</a>
+      ${srv ? '<button class="btn primary" id="fbSrv">☁️ 直接发给开发者</button>' : ''}
+      <a class="btn${srv ? '' : ' primary'}" id="fbMail" href="${esc(F.mailto(fb))}">📧 用邮件发送</a>
       <button class="btn" id="fbCopy">📋 复制全文</button>
       ${canShare ? `<button class="btn" id="fbShare">📤 分享${shotFile ? '（连截图）' : ''}</button>` : ''}
-      ${srv ? '<button class="btn" id="fbSrv">☁️ 发到服务器</button>' : ''}
     </div>
-    <p class="muted small">${FEEDBACK_EMAIL ? `邮件会发给 ${esc(FEEDBACK_EMAIL)}。` : '<b>收件邮箱还没定</b>：邮件 App 打开后请自己填收件人（或用“复制全文”发到微信）。'}${shotFile ? '邮件链接不能自动带附件，截图请在邮件里手动添加' + (canShare ? '，或用“分享”连截图一起发' : '') + '。' : ''}
+    <p class="muted small">${srv ? '推荐“直接发给开发者”：一点就发到自主学的服务器（连截图），开发者在后台就能看到；不用邮箱、不用加微信。' : ''}${FEEDBACK_EMAIL ? `邮件会发给 ${esc(FEEDBACK_EMAIL)}。` : '<b>收件邮箱还没定</b>：邮件 App 打开后请自己填收件人（或用“复制全文”发到微信）。'}${shotFile ? '邮件链接不能自动带附件，截图请在邮件里手动添加' + (canShare ? '，或用“分享”连截图一起发' : '') + '。' : ''}
     ${srv ? '' : '现在没有反馈服务器（应用是静态网页），上线同步服务器后这里会出现“发到服务器”。'}</p>
     <pre class="fbtext" id="fbTextOut">${esc(F.toText(fb))}</pre>
     <div class="row gap"><button class="btn" data-close>完成</button></div>`;
@@ -64,8 +64,8 @@ export async function sendPanel(el, fb, shotFile = null) {
   });
   $('#fbSrv', el)?.addEventListener('click', async e => {
     const b = e.currentTarget; b.disabled = true; b.textContent = '发送中…';
-    try { const r = await F.sendToServer(fb, srv); await done('server', '已发到服务器' + (r.id ? '（编号 ' + r.id + '）' : '')); b.textContent = '✓ 已发到服务器'; }
-    catch (err) { toast(err.message, 5000); b.disabled = false; b.textContent = '☁️ 重试发到服务器'; }
+    try { const r = await F.sendToServer(fb, srv); await done('server', '已发到服务器' + (r.id ? '（编号 ' + r.id + '）' : '')); b.textContent = '✓ 已发给开发者'; }
+    catch (err) { toast(err.message, 5000); b.disabled = false; b.textContent = '☁️ 重试发给开发者'; }
   });
 }
 /** 「我的」里的反馈卡片 */

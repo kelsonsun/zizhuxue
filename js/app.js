@@ -153,7 +153,8 @@ async function boot() {
   cloud.boot().catch(e => console.warn('sync', e));
   import('./remind.js').then(R => R.boot()).catch(e => console.warn('remind', e)); // v1.8 学习提醒：开着就按设置重新排好
   import('./license.js').then(L => L.boot()).catch(e => console.warn('license', e)); // v1.9 试用次数 / 激活码 / 服务器对账
-  import('./share.js').then(S => S.boot()).catch(e => console.warn('share', e));    // v1.8 安卓「分享到自主学」（App 里的 intent）
+  import('./share.js').then(S => S.boot()).catch(e => console.warn('share', e));
+  import('./telemetry.js').then(T => T.boot()).catch(() => { }); // v1.9.2 匿名使用统计（只有配置了服务器地址才发；静默）    // v1.8 安卓「分享到自主学」（App 里的 intent）
   addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
 }
 // 手机键盘弹出时（文本框获得焦点）隐藏底部导航栏，避免它被顶到键盘上方挡住输入框
