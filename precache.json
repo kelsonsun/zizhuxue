@@ -1,5 +1,5 @@
 {
- "version": "b21e07201e",
+ "version": "5d49873104",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -7,6 +7,7 @@
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon-maskable-512.png",
+  "icons/og-card.png",
   "index.html",
   "js/ai.js",
   "js/app.js",
@@ -45,6 +46,7 @@
   "js/roots.js",
   "js/sense.js",
   "js/share.js",
+  "js/sharecard.js",
   "js/sm2.js",
   "js/snap.js",
   "js/speech.js",
