@@ -346,3 +346,7 @@ details.help.sec>summary{color:inherit}details.help.sec>summary h2{margin:0}deta
 #licCode{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;margin:4px 0 8px;letter-spacing:.5px}
 .licban>b{display:block}.licban p{margin:4px 0 8px}
 .tagline{margin:8px 0 10px;padding:8px 12px;border-radius:10px;background:#e8f3ef;color:var(--ac);font-size:16px}
+/* v1.9.1 分享给朋友 */
+.sharecard{border:2px solid #cfe5dd;background:linear-gradient(180deg,#f2faf7,#fff)}.sharecard .btn{min-height:44px}
+.sharecardimg{max-height:60vh;width:auto;max-width:100%;display:block;margin:0 auto 8px;height:auto}
+.scbtns .btn{flex:1 1 30%;min-width:0;min-height:44px;white-space:nowrap}
