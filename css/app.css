@@ -350,3 +350,11 @@ details.help.sec>summary{color:inherit}details.help.sec>summary h2{margin:0}deta
 .sharecard{border:2px solid #cfe5dd;background:linear-gradient(180deg,#f2faf7,#fff)}.sharecard .btn{min-height:44px}
 .sharecardimg{max-height:60vh;width:auto;max-width:100%;display:block;margin:0 auto 8px;height:auto}
 .scbtns .btn{flex:1 1 30%;min-width:0;min-height:44px;white-space:nowrap}
+/* v1.9.3 已保存教材随时编辑 + 改完手动「重新翻译」；拆分可从中文拆 */
+.sent.editing{border-color:var(--ac);background:#fbfdfc}.sent.editing .sbody{flex:1;min-width:0}
+.sedit textarea{width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:10px;margin:2px 0 6px;resize:vertical}
+.sedit label{display:block}.pedit-bar{margin:6px 0 12px}
+.retr-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}.retr-row .muted{flex:1 1 140px}
+.mini.retr{color:var(--ac);border-color:var(--ac);font-weight:600}
+.ptools{flex-wrap:wrap}.sfield{margin:0 0 6px}.sfield .btn{flex:1}
+@media (pointer:coarse){html .sent .mini[data-edit],html .mini.retr,html .phead .mini[data-pedit]{min-height:44px;min-width:44px}}
