@@ -156,6 +156,15 @@ async function boot() {
   import('./share.js').then(S => S.boot()).catch(e => console.warn('share', e));
   import('./telemetry.js').then(T => T.boot()).catch(() => { }); // v1.9.2 匿名使用统计（只有配置了服务器地址才发；静默）    // v1.8 安卓「分享到自主学」（App 里的 intent）
   addEventListener('zzx-synced', () => { if (!busy() && !location.hash.startsWith('#/me')) render(); });
+  // v1.9.4 内置 AI：状态从服务器拿到（开 / 关变了）就刷新当前页按钮；联网时再问一次；额度用完等自动改用免费翻译时提示一次
+  addEventListener('zzx-ai-status', () => { if (!busy()) render(); });
+  addEventListener('online', () => ai.initBuiltin({ force: true }));
+  let fbShown = 0;
+  addEventListener('zzx-ai-fallback', e => {
+    import('./telemetry.js').then(T => T.track('ai_fallback')).catch(() => { });
+    if (Date.now() - fbShown < 60000) return; fbShown = Date.now();
+    toast(e.detail.message + `（这次已自动改用免费的${e.detail.via === 'chrome' ? '浏览器端侧翻译' : ' MyMemory 机器翻译'}）`, 7000);
+  });
 }
 // 手机键盘弹出时（文本框获得焦点）隐藏底部导航栏，避免它被顶到键盘上方挡住输入框
 function watchKeyboard() {

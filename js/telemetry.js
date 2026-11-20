@@ -9,7 +9,7 @@ import { SYNC_AVAILABLE, SYNC_URL } from './deploy.js';
 import { telemetryUrl } from './endpoint.js';
 import { APP_VERSION } from './version.js';
 
-export const EVENTS = ['open', 'import', 'study', 'quiz', 'review', 'share'];
+export const EVENTS = ['open', 'import', 'study', 'quiz', 'review', 'share', 'ai_own_ok', 'ai_own_fail', 'ai_fallback']; // v1.9.4 后三个：自己密钥调用成功 / 失败、内置 AI 改用免费翻译（只计数，不含内容）
 export const MAX_BATCH = 20, MAX_QUEUE = 60;
 const K = { id: 'zzx.tid', q: 'zzx.telq', open: 'zzx.telopen', off: 'zzx.teloff' };
 

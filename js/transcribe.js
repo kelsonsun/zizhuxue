@@ -303,7 +303,7 @@ function postForm(path, form, { signal, onUpload, timeout = 300000 }) {
 }
 /** onProgress({phase:'api', done, total, chunk, chunks, upload, elapsed, eta}) */
 export async function transcribeApi(pcm, { onProgress = () => { }, signal } = {}) {
-  if (!ai.isConfigured()) throw new ai.AIError(ai.NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
+  if (!ai.hasOwnKey()) throw new ai.AIError(ai.NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
   const model = apiModel(), seg = apiHasSegments(model);
   const chunks = planChunks(pcm, seg ? LIMITS.apiChunkSec : 30, seg ? LIMITS.apiChunkSec - 30 : 20);
   const total = pcm.length / SR; const segs = []; let done = 0; const t0 = performance.now(); let text = '';

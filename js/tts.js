@@ -9,8 +9,8 @@ const loadVoices = () => { try { voices = speechSynthesis.getVoices() || []; } c
 if ('speechSynthesis' in globalThis) { loadVoices(); speechSynthesis.addEventListener?.('voiceschanged', loadVoices); }
 export const supported = () => 'speechSynthesis' in globalThis;
 export const ACCENTS = { auto: '自动', 'en-US': '美式 en-US', 'en-GB': '英式 en-GB', 'en-AU': '澳式 en-AU' };
-export const AI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
-export const AI_TTS_MODEL = 'gpt-4o-mini-tts';
+import { AI_VOICES, AI_TTS_MODEL, speechBody } from './aiprompts.js';
+export { AI_VOICES, AI_TTS_MODEL };
 const norm = l => String(l || '').replace('_', '-').toLowerCase();
 // macOS/iOS 的趣味/怪声，不适合跟读
 const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Ralph|Kathy|Grandma|Grandpa|Rocko|Shelley|Flo|Eddy|Reed|Sandy)\b/i;
@@ -44,7 +44,7 @@ const langFor = v => v?.lang?.replace('_', '-') || ((settings.accent && settings
 let audio = null; let notified = '';
 const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
 export const aiEnabled = () => settings.ttsEngine === 'ai' && ai.isConfigured();
-const aiModel = () => (settings.aiTtsModel || '').trim() || AI_TTS_MODEL;
+const aiModel = () => ai.hasOwnKey() ? (settings.aiTtsModel || '').trim() || AI_TTS_MODEL : 'builtin'; // v1.9.4 内置 AI 语音：模型由服务器定
 const aiVoice = () => AI_VOICES.includes(settings.aiVoice) ? settings.aiVoice : 'coral';
 const cacheKey = text => 'tts:' + hash([aiModel(), aiVoice(), settings.accent || 'auto', text].join('|'));
 async function cacheIndex() { return db.meta.get('ttsCache', []); }
@@ -54,12 +54,13 @@ export async function clearCache() { for (const x of await cacheIndex()) await d
 export async function aiAudio(text) {
   const k = cacheKey(text); const hit = await db.blobs.get(k).catch(() => null);
   if (hit?.blob) return { blob: hit.blob, cached: true };
-  const c = ai.getConfig(); const model = aiModel(); const accent = settings.accent || 'auto';
-  const body = { model, voice: aiVoice(), input: text, response_format: 'mp3' };
-  if (/^gpt-4o/i.test(model) && accent !== 'auto') body.instructions = `Speak clearly at a natural pace with a ${{ 'en-US': 'General American', 'en-GB': 'British (Received Pronunciation)', 'en-AU': 'Australian' }[accent]} English accent.`;
-  const r = await ai.aiFetch('/audio/speech', body, { timeout: 30000 });
-  if (!r.ok) { let j = null; try { j = await r.json(); } catch { } const e = ai.explainError(r.status, j); if (r.status === 404 && !/模型/.test(e.message)) e.message = `这个接口没有 AI 语音（${c.baseUrl}/audio/speech 返回 404），或模型“${model}”不可用`; throw e; }
-  const blob = await r.blob(); if (!blob.size) throw new ai.AIError('AI 语音接口返回了空音频', 'BAD_FORMAT');
+  const c = ai.getConfig(); const model = aiModel(); const accent = settings.accent || 'auto'; let blob;
+  if (ai.hasOwnKey()) {
+    const r = await ai.aiFetch('/audio/speech', speechBody({ text, model, voice: aiVoice(), accent }), { timeout: 30000 });
+    if (!r.ok) { let j = null; try { j = await r.json(); } catch { } const e = ai.explainError(r.status, j); if (r.status === 404 && !/模型/.test(e.message)) e.message = `这个接口没有 AI 语音（${c.baseUrl}/audio/speech 返回 404），或模型“${model}”不可用`; throw e; }
+    blob = await r.blob(); if (!blob.size) throw new ai.AIError('AI 语音接口返回了空音频', 'BAD_FORMAT');
+  } else if (ai.usingBuiltin()) blob = await ai.builtinSpeech({ text, voice: aiVoice(), accent }); // v1.9.4 内置 AI 语音（服务器代理，有缓存）
+  else throw new ai.AIError(ai.NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
   await db.blobs.set(k, blob); const ix = (await cacheIndex()).filter(x => x.k !== k); ix.push({ k, n: blob.size, t: Date.now() });
   while (ix.length > 400) { const o = ix.shift(); await db.blobs.del(o.k).catch(() => { }); } // 本机最多缓存 400 段
   await db.meta.set('ttsCache', ix); return { blob, cached: false };

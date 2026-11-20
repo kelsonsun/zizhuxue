@@ -42,16 +42,18 @@ export function applyRetrans(s, dir, text, provider) {
 export async function retranslate(list, { provider, translate }) {
   const groups = { en2zh: [], zh2en: [] };
   for (const s of list) groups[retransDir(s)].push(s);
-  const out = [];
+  const out = []; let via = provider;
   for (const dir of ['en2zh', 'zh2en']) {
     const g = groups[dir]; if (!g.length) continue;
     const src = g.map(s => (dir === 'en2zh' ? s.en : s.zh) || '');
     if (src.some(x => !x.trim())) throw new Error('这句没有可翻译的原文');
     const res = await translate(provider, src, dir);
     if (!Array.isArray(res) || res.length !== g.length || res.some((t, k) => !plausible(src[k], t, dir))) throw new Error('没有翻译出来（结果为空或和原文一样）');
-    g.forEach((s, k) => out.push([s, dir, res[k]]));
+    if (res.via) via = res.via; // v1.9.4 内置 AI 不可用时自动改用了免费翻译
+    g.forEach((s, k) => out.push([s, dir, res[k], res.via || provider]));
   }
-  for (const [s, dir, t] of out) applyRetrans(s, dir, t, provider);
+  for (const [s, dir, t, p] of out) applyRetrans(s, dir, t, p);
+  retranslate.via = via;
   return out.length;
 }
 

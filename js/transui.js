@@ -13,7 +13,7 @@ export async function openTranslate({ ids, title, onDone } = {}) {
   if (!st.left) return toast('这份材料已经有完整的对照翻译了');
   const dir = st.dir || 'en2zh';
   const cs = await T.chromeStatus(dir);
-  const aiOk = ai.isConfigured(); const host = aiOk ? (() => { try { return new URL(ai.getConfig().baseUrl).host; } catch { return ai.getConfig().baseUrl; } })() : '';
+  const aiOk = ai.isConfigured(); const builtin = ai.usingBuiltin(); const host = ai.hasOwnKey() ? (() => { try { return new URL(ai.getConfig().baseUrl).host; } catch { return ai.getConfig().baseUrl; } })() : '自主学服务器（内置 AI）';
   const quota = settings.mmEmail ? 50000 : 5000; const days = Math.ceil(st.chars / quota);
   const csText = { available: '可用：语言包已在本机，翻译在本机完成，不上传。', downloadable: '可用：第一次需要下载语言包（由浏览器下载），之后在本机翻译，不上传。', downloading: '语言包下载中，可用。', unavailable: '不可用：此浏览器不支持这个语言对或设备。', none: '不可用：只有电脑版 Chrome 138+ / Edge 148+ 才有；iPhone 上的 Safari、Chrome 等都没有这个功能。' }[cs];
   const csOk = ['available', 'downloadable', 'downloading'].includes(cs);
@@ -24,13 +24,13 @@ export async function openTranslate({ ids, title, onDone } = {}) {
     <p class="muted">还有 <b>${st.left}</b> 句要翻译，约 <b>${st.chars}</b> 个字符。翻译分批进行，翻完一批就保存一批；中途关掉也不会丢，之后可以接着翻。</p>
     <div class="list tlist">
       <label class="item tp ${aiOk ? '' : 'off'}"><input type="radio" name="tp" value="ai" ${aiOk ? '' : 'disabled'} ${def === 'ai' ? 'checked' : ''}><div><b>${T.NAMES.ai}</b>
-        ${lastErr && aiOk ? `<span class="small warn">上次 AI 翻译没成功：${esc(lastErr)}。已默认改选下面的免费通道，也可以处理好后再选 AI。</span>` : ''}<span class="muted small">${aiOk ? `质量最好。内容会发送到你配置的接口（${esc(host)}），按你的服务计费。` : '未配置AI，无法生成。去「我的 → AI 设置」填好接口后可用。'}</span></div></label>
+        ${lastErr && aiOk ? `<span class="small warn">上次 AI 翻译没成功：${esc(lastErr)}。已默认改选下面的免费通道，也可以处理好后再选 AI。</span>` : ''}<span class="muted small">${builtin ? `质量最好，内置 AI，不用设置。<b>按学习进度翻译</b>：一次先翻从你学到的位置往后的 ${T.BUILTIN_WINDOW} 句${st.left > T.BUILTIN_WINDOW ? `（共 ${st.left} 句，学到后面再点「继续翻译」）` : ''}。免费额度用完时自动改用免费翻译。` : aiOk ? `质量最好。内容会发送到你配置的接口（${esc(host)}），按你的服务计费。` : '未配置AI，无法生成。去「我的 → AI 设置」填好接口后可用。'}</span></div></label>
       <label class="item tp ${csOk ? '' : 'off'}"><input type="radio" name="tp" value="chrome" ${csOk ? '' : 'disabled'} ${def === 'chrome' ? 'checked' : ''}><div><b>${T.NAMES.chrome}</b><span class="muted small">${csText}</span></div></label>
       <label class="item tp"><input type="radio" name="tp" value="mymemory" ${def === 'mymemory' ? 'checked' : ''}><div><b>${T.NAMES.mymemory}</b>
         <span class="muted small">免费、不用注册，iPhone 也能用（需要联网）。额度：${settings.mmEmail ? '已填邮箱，约 50000' : '匿名约 5000'} 字符/天${days > 1 ? `，这份材料大约要分 <b>${days}</b> 天翻完（额度用完会自动暂停，第二天点“继续”即可）` : ''}。机器翻译，质量一般，可逐句改。</span></div></label>
     </div>
     <label class="check consent hidden" id="mmc"><input type="checkbox" id="mmok"><span>我知道：句子会逐句发送到第三方 <b>MyMemory（Translated 公司，api.mymemory.translated.net）</b>的服务器做翻译${settings.mmEmail ? '，同时附上我填的邮箱' : ''}。涉及隐私（姓名、电话、病历）的内容不要用这个通道。</span></label>
-    <label class="check consent hidden" id="aic"><input type="checkbox" id="aiok"><span>我知道：内容会发送到我配置的 AI 接口（${esc(host)}）。</span></label>
+    <label class="check consent hidden" id="aic"><input type="checkbox" id="aiok"><span>${builtin ? '我知道：内容会经自主学服务器发送给 AI 服务商翻译（译文会在服务器缓存，不记录是谁）。' : `我知道：内容会发送到我配置的 AI 接口（${esc(host)}）。`}</span></label>
     <div class="row gap"><button class="btn" data-close>取消</button><button class="btn primary grow" id="tgo">开始翻译</button></div>`);
   const el = s.el;
   const upd = () => { const v = $('input[name=tp]:checked', el)?.value; $('#mmc', el).classList.toggle('hidden', v !== 'mymemory'); $('#aic', el).classList.toggle('hidden', v !== 'ai');
@@ -44,7 +44,8 @@ export async function openTranslate({ ids, title, onDone } = {}) {
 }
 export function start(ids, { provider, dir, title, onDone }) {
   T.run(ids, { provider, dir, title }).then(async () => {
-    const st = await T.statsOf(ids); toast(st.left ? `翻译完成，但有 ${st.left} 句没译好（可再点继续，或手动补）` : `《${title}》翻译完成（${T.SHORT[provider]}，可逐句修改）`, 4000); onDone?.();
+    const st = await T.statsOf(ids); const win = T.job.windowed; const fb = T.job.via ? `。${T.job.fallback || '内置 AI 暂时不可用'}（已自动改用免费的${T.SHORT[T.job.via]}）` : '';
+    toast(fb && !st.left ? `《${title}》翻译完成${fb}` : win ? `已按学习进度翻好接下来的一段（${T.job.done} 句）。学到后面再点「继续翻译」${fb}` : st.left ? `翻译完成，但有 ${st.left} 句没译好（可再点继续，或手动补）${fb}` : `《${title}》翻译完成（${T.SHORT[provider]}，可逐句修改）`, 4000); onDone?.();
   }).catch(e => { toast(e.code === 'PAUSED' ? e.message : '翻译暂停：' + e.message + (provider === 'ai' ? '。已翻好的都保存了；可以点「继续翻译」改用免费的 MyMemory 公共翻译接着翻。' : ''), 8000); onDone?.(); });
 }
 
@@ -72,5 +73,5 @@ export async function statusHtml(ids, m) {
   const dir = st.dir || 'en2zh';
   const resume = tr && tr.status && tr.status !== 'done';
   return `<div class="note tnote">${dir === 'en2zh' ? `这份材料是纯英文，还有 ${st.left} 句没有中文翻译。` : `这份材料是中文，还有 ${st.left} 句没有英文译文（英文译文会作为学习内容）。`}
-    ${resume ? `<br>上次翻译到一半${tr.error ? `（${esc(tr.error)}）` : ''}，可以接着翻${tr.provider === 'ai' && tr.error ? '，也可以改用免费的 MyMemory 公共翻译' : ''}。` : ''}<div class="row gap"><button class="btn primary" id="trBtn">🌐 ${resume ? '继续翻译' : dir === 'en2zh' ? '配上中文翻译' : '配上英文译文'}</button></div></div>`;
+    ${tr?.window && tr.status === 'partial' ? '<br>内置 AI 按学习进度翻译：已翻好接下来要学的部分，学到后面再点「继续翻译」。' : resume ? `<br>上次翻译到一半${tr.error ? `（${esc(tr.error)}）` : ''}，可以接着翻${tr.provider === 'ai' && tr.error ? '，也可以改用免费的 MyMemory 公共翻译' : ''}。` : ''}<div class="row gap"><button class="btn primary" id="trBtn">🌐 ${resume ? '继续翻译' : dir === 'en2zh' ? '配上中文翻译' : '配上英文译文'}</button></div></div>`;
 }

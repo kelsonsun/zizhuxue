@@ -9,7 +9,7 @@ import { settings } from './state.js';
 import { lang } from './textproc.js';
 
 export const MM_DEFAULT = 'https://api.mymemory.translated.net/get';
-export const NAMES = { ai: 'AI（你配置的接口）', chrome: '浏览器内置翻译（端侧）', mymemory: 'MyMemory 公共翻译' };
+export const NAMES = { ai: 'AI 翻译', chrome: '浏览器内置翻译（端侧）', mymemory: 'MyMemory 公共翻译' };
 export const SHORT = { ai: 'AI 翻译', chrome: '浏览器端侧翻译', mymemory: 'MyMemory 机器翻译', manual: '手动' };
 export class QuotaError extends Error { constructor(m) { super(m); this.code = 'QUOTA'; } }
 const CJK = /[\u3400-\u9fff]/, LAT = /[A-Za-z]/;
@@ -65,7 +65,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /** 把一批原文译成目标语言，返回等长数组（某句失败则为 null）。 */
 export async function translateTexts(provider, texts, dir) {
-  if (provider === 'ai') return ai.translateBatch(texts, dir);
+  if (provider === 'ai') {
+    try { return await ai.translateBatch(texts, dir); }
+    catch (e) {
+      // v1.9.4 内置 AI 额度用完 / 花费上限 / 关闭 / 服务器出错：自动改用免费翻译（浏览器端侧翻译已就绪就用它，否则 MyMemory），并友好提示
+      const builtinErr = /^SRV_/.test(e.code || '') || (!ai.hasOwnKey() && ai.isBuiltinFallback(e));
+      if (!builtinErr || (globalThis.navigator && navigator.onLine === false)) throw e;
+      const via = chromeTr[dir] ? 'chrome' : 'mymemory';
+      globalThis.dispatchEvent?.(new CustomEvent('zzx-ai-fallback', { detail: { code: e.code, message: e.message, via } }));
+      const out = await translateTexts(via, texts, dir); out.via = via; return out;
+    }
+  }
   if (provider === 'chrome') { const tr = chromeTr[dir]; if (!tr) throw new Error('浏览器内置翻译还没准备好'); const out = []; for (const t of texts) out.push(await tr.translate(t)); return out; }
   if (provider === 'mymemory') {
     const out = [];
@@ -94,25 +104,38 @@ export async function statsOf(ids) {
  * 运行翻译任务：逐章、每批 batch 句，翻完一批就存一次（所以随时中断都能续传）。
  * 每句标记 s.tr = 通道名（界面显示“机器翻译，可改”）。
  */
-export async function run(ids, { provider, dir, title = '', batch = provider === 'ai' ? 15 : 5 } = {}) {
+/** v1.9.4 内置 AI 按学习进度翻译：一次最多翻这么多句（从学到的位置往后），学到后面再继续 */
+export const BUILTIN_WINDOW = 30;
+/** 从学习位置（第一句还没学完的）开始排待翻译的句子：往后的优先，再回头补前面的 */
+export function learnOrder(m, todo) {
+  const idx = new Map(m.sentences.map((s, i) => [s, i]));
+  let pos = m.sentences.findIndex(s => !m.progress?.done?.[s.id]); // 学习位置 = 第一句还没学完的
+  if (pos < 0) pos = 0;
+  return [...todo.filter(s => idx.get(s) >= pos), ...todo.filter(s => idx.get(s) < pos)];
+}
+export async function run(ids, { provider, dir, title = '', batch = provider === 'ai' ? 15 : 5, window = provider === 'ai' && ai.usingBuiltin() ? BUILTIN_WINDOW : 0 } = {}) {
   if (job.running) throw new Error('已有翻译任务在进行');
-  Object.assign(job, { running: true, cancel: false, ids, title, provider, dir, error: null });
-  const st = await statsOf(ids); job.total = st.left; job.done = 0; emit();
+  Object.assign(job, { running: true, cancel: false, ids, title, provider, dir, error: null, windowed: false, via: null, fallback: null });
+  const st = await statsOf(ids); job.total = window ? Math.min(window, st.left) : st.left; job.done = 0; emit();
+  let budget = window || Infinity;
   try {
     for (const id of ids) {
       const m = await db.materials.get(id); if (!m) continue;
       m.trans = { ...(m.trans || {}), dir, provider, status: 'running', at: Date.now() }; await db.materials.save(m);
       let todo = pending(m.sentences, dir);
+      if (window) { if (budget <= 0) { job.windowed = true; m.trans.status = 'partial'; m.trans.window = true; await db.materials.save(m); continue; } todo = learnOrder(m, todo); if (todo.length > budget) { todo = todo.slice(0, budget); job.windowed = true; } budget -= todo.length; }
       for (let i = 0; i < todo.length; i += batch) {
         if (job.cancel) { m.trans.status = 'paused'; await db.materials.save(m); throw Object.assign(new Error('已暂停，进度已保存，可随时继续'), { code: 'PAUSED' }); }
         const part = todo.slice(i, i + batch); let res;
-        try { res = await translateTexts(provider, part.map(s => srcOf(s, dir)), dir); }
+        const onFb = e => { job.fallback = e.detail?.message || ''; }; globalThis.addEventListener?.('zzx-ai-fallback', onFb);
+        try { res = await translateTexts(provider, part.map(s => srcOf(s, dir)), dir); if (res.via) job.via = res.via; }
         catch (e) { m.trans.status = 'paused'; m.trans.error = e.message; await db.materials.save(m); throw e; }
-        part.forEach((s, k) => { const t = res[k]; const src = srcOf(s, dir); if (!plausible(src, t, dir)) { s.trFail = (s.trFail || 0) + 1; return; } if (dir === 'en2zh') s.zh = t.trim(); else { s.en = t.trim(); s.orig = 'zh'; } s.tr = provider; delete s.trFail; });
+        finally { globalThis.removeEventListener?.('zzx-ai-fallback', onFb); }
+        part.forEach((s, k) => { const t = res[k]; const src = srcOf(s, dir); if (!plausible(src, t, dir)) { s.trFail = (s.trFail || 0) + 1; return; } if (dir === 'en2zh') s.zh = t.trim(); else { s.en = t.trim(); s.orig = 'zh'; } s.tr = res.via || provider; delete s.trFail; });
         m.updatedAt = Date.now(); await db.materials.save(m);
         job.done += part.length; emit();
       }
-      const left = pending(m.sentences, dir).length; m.trans.status = left ? 'partial' : 'done'; m.trans.failed = left; delete m.trans.error; await db.materials.save(m);
+      const left = pending(m.sentences, dir).length; m.trans.status = left ? 'partial' : 'done'; m.trans.failed = left; delete m.trans.error; if (window && left) m.trans.window = true; else delete m.trans.window; await db.materials.save(m);
     }
   } catch (e) { job.error = e; throw e; }
   finally { job.running = false; emit(); }

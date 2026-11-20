@@ -1,33 +1,22 @@
-// AI：兼容 OpenAI 的 /chat/completions 接口。地址/密钥/模型由用户填写，密钥只存本机 IndexedDB（不进导出备份）。
-// 未配置时所有 AI 功能直接拒绝（NOT_CONFIGURED），绝不产生任何“假结果”。本文件不读取任何环境变量。
+// AI：兼容 OpenAI 的 /chat/completions 接口。两条通路（都是真的 AI，绝不造假结果）：
+//  ① 自己填的密钥（地址/密钥/模型由用户填写，密钥只存本机 IndexedDB，不进导出备份）——优先用；
+//  ② v1.9.4 内置 AI：没填密钥时，经自主学服务器代理（密钥只在服务器上，不下发到网页；服务器按设备限额度、缓存、控花费）。
+// 两条都不可用（服务器 AI 未开 / 离线）时所有 AI 功能直接拒绝（NOT_CONFIGURED），按钮显示“未配置AI，无法生成”。
 import * as db from './db.js';
+import * as P from './aiprompts.js';
+import { aiUrl } from './endpoint.js';
+import { APP_VERSION } from './version.js';
 export const NOT_CONFIGURED_MSG = '未配置AI，无法生成';
-export class AIError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
+export const { AIError, DEFAULT_BASE, DEFAULT_MODEL, normalizeBase, normalizeKey, badKeyChars, extractJSON } = P;
 let cfg = null;
 export async function loadConfig() {
   cfg = await db.meta.get('ai', null);
   // 旧版本保存的配置也规范一遍（地址缺 /v1、密钥带空格、模型留空等）
   if (cfg && cfg.apiKey) cfg = { ...cfg, baseUrl: normalizeBase(cfg.baseUrl), apiKey: normalizeKey(cfg.apiKey), model: String(cfg.model || '').trim() || DEFAULT_MODEL };
+  initBuiltin();
   return cfg;
 }
 export function getConfig() { return cfg; }
-export const DEFAULT_BASE = 'https://api.openai.com/v1', DEFAULT_MODEL = 'gpt-4o-mini';
-/** 规范接口地址：补 https://、去掉多余斜杠和误贴的 /chat/completions；只有域名时补 /v1（OpenAI 官方地址必须带 /v1） */
-export function normalizeBase(u) {
-  let s = String(u || '').trim().replace(/[\s\u200b-\u200d\ufeff]+/g, '').replace(/[“”"'‘’]/g, '');
-  if (!s) return DEFAULT_BASE;
-  if (!/^https?:\/\//i.test(s)) s = 'https://' + s.replace(/^\/+/, '');
-  s = s.replace(/\/+(chat\/completions|completions|audio\/speech|audio\/transcriptions|models)\/*$/i, '').replace(/\/+$/, '');
-  try { const x = new URL(s); x.pathname = x.pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, ''); if (!x.pathname || x.pathname === '/') x.pathname = '/v1'; s = x.origin + x.pathname; } catch { }
-  return s;
-}
-/** 规范密钥：去掉前后空格、换行、零宽字符、引号，以及误贴的 “Bearer ” 前缀 */
-export const normalizeKey = k => String(k || '').normalize('NFKC').replace(/[\s\u00a0\u200b-\u200f\u2028\u2029\u2060\ufeff]+/g, '').replace(/^["'“”‘’「」]+|["'“”‘’「」]+$/g, '').replace(/^Bearer/i, '').replace(/[‐‑‒–—―−]/g, '-');
-/** 密钥里不能出现的字符（HTTP 头只允许可见 ASCII；iPhone 粘贴偶尔夹带全角/中文/省略号）。返回问题描述或 '' */
-export function badKeyChars(k) {
-  const bad = [...String(k || '')].map((c, i) => ({ c, i })).filter(x => !/[\x21-\x7e]/.test(x.c));
-  return bad.length ? bad.slice(0, 3).map(x => `第 ${x.i + 1} 个字符“${x.c}”(U+${x.c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`).join('、') : '';
-}
 const errInfo = e => e ? `${e.name || 'Error'}: ${e.message || e}` : '';
 /**
  * 带密钥请求 AI 接口：先校验密钥字符；超时可控；网络失败时再做一次“不带密钥的简单请求”探测，
@@ -49,33 +38,24 @@ export async function aiFetch(path, body, { timeout = 120000 } = {}) {
     throw new AIError(`能连上 ${host}（不带密钥的探测请求能到达服务器），但带密钥的请求被浏览器拦截了（CORS 预检失败）。常见原因：接口地址不是 OpenAI 兼容地址，或该服务不允许网页直接调用，或被内容拦截器改写。（浏览器错误：${errInfo(e)}）`, 'CORS');
   } finally { clearTimeout(to); }
 }
-export function isConfigured() { return !!(cfg && cfg.baseUrl && cfg.apiKey && cfg.model); }
+/** 自己填了密钥 */
+export function hasOwnKey() { return !!(cfg && cfg.baseUrl && cfg.apiKey && cfg.model); }
+/** 有 AI 可用：自己的密钥，或内置 AI（服务器开着、在线） */
+export function isConfigured() { return hasOwnKey() || builtinReady(); }
+/** 这次会走内置 AI（没填密钥、服务器 AI 可用） */
+export const usingBuiltin = () => !hasOwnKey() && builtinReady();
 export async function saveConfig(c) {
   cfg = { ...(cfg || {}), ...c, baseUrl: normalizeBase(c.baseUrl), apiKey: normalizeKey(c.apiKey), model: String(c.model || '').trim() || DEFAULT_MODEL };
   await db.meta.set('ai', cfg);
 }
 export async function clearConfig() { cfg = null; await db.meta.set('ai', null); }
 
-function extractJSON(text) {
-  const t = String(text || '').trim();
-  try { return JSON.parse(t); } catch {}
-  const f = t.match(/```(?:json)?\s*([\s\S]*?)```/i); if (f) try { return JSON.parse(f[1]); } catch {}
-  const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a >= 0 && b > a) try { return JSON.parse(t.slice(a, b + 1)); } catch {}
-  throw new AIError('AI 返回的内容不是有效的 JSON，请重试', 'BAD_FORMAT');
-}
+/** 把 HTTP 错误翻成具体原因（带上当前模型 / 地址，不含密钥） */
+export const explainError = (status, j) => P.explainError(status, j, { model: cfg?.model, baseUrl: cfg?.baseUrl });
 
-/** 把 HTTP 错误翻成具体原因 */
-export function explainError(status, j) {
-  const e = j?.error || {}; const m = String(e.message || (typeof j?.error === 'string' ? j.error : '') || j?.message || ''); const code = String(e.code || e.type || '');
-  if (status === 401) return new AIError('密钥无效（401）：请检查密钥是否完整、有没有多复制空格，或密钥已被删除。' + (m ? ' 服务返回：' + m : ''), 'AUTH');
-  if (status === 403) return new AIError('没有权限（403）：密钥无权使用这个模型/接口，或所在地区不被支持。' + (m ? ' 服务返回：' + m : ''), 'AUTH');
-  if (status === 429 && /insufficient_quota|quota|billing|balance|余额/i.test(code + ' ' + m)) return new AIError('余额不足（429 insufficient_quota）：这个账号没有可用额度，请到服务商后台充值或检查账单。', 'QUOTA');
-  if (status === 429) return new AIError('请求太频繁（429）：稍等一会儿再试。' + (m ? ' 服务返回：' + m : ''), 'RATE');
-  if (status === 404) return new AIError(/model/i.test(code + m) ? `模型不存在（404）：“${cfg?.model}”在这个接口上不可用，请换一个模型名。` + (m ? ' 服务返回：' + m : '') : `接口地址不对（404）：${cfg?.baseUrl}/chat/completions 不存在，请检查地址（一般以 /v1 结尾）。` + (m ? ' 服务返回：' + m : ''), 'NOT_FOUND');
-  return new AIError(`AI 服务出错（${status}）${m ? '：' + m : ''}`, 'HTTP');
-}
+/** 用自己的密钥调 /chat/completions */
 async function chat(messages, { json = true, temperature = 0.4, timeout = 120000 } = {}) {
-  if (!isConfigured()) throw new AIError(NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
+  if (!hasOwnKey()) throw new AIError(NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
   const call = ({ fmt, temp }) => aiFetch('/chat/completions', { model: cfg.model, messages, ...(temp ? { temperature } : {}), ...(fmt && json ? { response_format: { type: 'json_object' } } : {}) }, { timeout });
   // 有的模型不支持 temperature（如推理模型）或 response_format：遇到 400/422 依次去掉再试
   let r = await call({ fmt: true, temp: true });
@@ -87,11 +67,97 @@ async function chat(messages, { json = true, temperature = 0.4, timeout = 120000
   return json ? extractJSON(content) : content;
 }
 
-const SYS = '你是为中国成年英语学习者服务的英语老师助手。只输出 JSON，不要多余文字。英文要地道自然，中文要准确简洁。';
+// ———— v1.9.4 内置 AI（服务器代理） ————
+const SK = 'zzx.aisrv', DK = 'zzx.aiid';
+let srv = null; let statusJob = null;
+const ls = () => { try { return globalThis.localStorage || null; } catch { return null; } };
+const online = () => !(globalThis.navigator && navigator.onLine === false);
+/** 服务器 AI 接口地址（deploy.js 的 AI_URL，按 endpoint.js 规则过滤；本机开发页面 / 自动化浏览器不连公网服务器） */
+export const builtinUrl = () => { try { return aiUrl(); } catch { return ''; } };
+/** 内置 AI 的状态（上次从服务器拿到的，存在 localStorage，启动时不用等网络） */
+export const builtinStatus = () => srv;
+export const builtinReady = () => !!(srv?.enabled && builtinUrl() && online());
+/** 启动时（和以后每 30 分钟）问一次服务器：内置 AI 开着没有、额度多少。离线不请求。 */
+export function initBuiltin({ force = false } = {}) {
+  const u = builtinUrl();
+  if (!u) { srv = null; return Promise.resolve(null); }
+  if (!srv) { try { const c = JSON.parse(ls()?.getItem(SK) || 'null'); if (c && c.url === u) srv = c; } catch { } }
+  if (!online()) return Promise.resolve(srv);
+  if (statusJob) return statusJob;
+  if (!force && srv?.at && Date.now() - srv.at < 30 * 60000) return Promise.resolve(srv);
+  statusJob = (async () => {
+    try {
+      const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 8000);
+      const r = await fetch(u + 'status', { signal: ac.signal, credentials: 'omit', cache: 'no-store' }).finally(() => clearTimeout(to));
+      const was = !!srv?.enabled; const j = await r.json(); srv = { ...j, enabled: !!(r.ok && j.enabled), url: u, at: Date.now() }; try { ls()?.setItem(SK, JSON.stringify(srv)); } catch { }
+      if (was !== srv.enabled) globalThis.dispatchEvent?.(new Event('zzx-ai-status')); // 内置 AI 开 / 关变了：界面刷新按钮状态
+    } catch { /* 连不上：沿用上次的状态（真调用时如实报错） */ }
+    finally { statusJob = null; }
+    return srv;
+  })();
+  return statusJob;
+}
+/** 内置 AI 用的匿名设备 ID（只用来按设备算额度；服务器只存它的加盐哈希） */
+export function builtinDeviceId() {
+  const s = ls(); let id = s?.getItem(DK) || '';
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) { const a = new Uint8Array(16); crypto.getRandomValues(a); id = 'a_' + [...a].map(b => b.toString(16).padStart(2, '0')).join(''); try { s?.setItem(DK, id); } catch { } }
+  return id;
+}
+const SRV_MSG = {
+  quota_device: '今天内置 AI 的免费额度用完了（每台设备每天有上限），明天自动恢复。也可以在「我的 → AI 设置」填自己的密钥继续用。',
+  quota_month: '这个月内置 AI 的免费额度用完了，下个月自动恢复。也可以在「我的 → AI 设置」填自己的密钥继续用。',
+  budget: '内置 AI 本月的总额度已经用完（开发者设的花费上限），下个月恢复。也可以在「我的 → AI 设置」填自己的密钥继续用。',
+  ai_off: '内置 AI 暂时关闭了。可以在「我的 → AI 设置」填自己的密钥使用。',
+  rate_limited: '用得太快了，请稍等一会儿再试。',
+  too_big: '内容太长了，内置 AI 一次处理不了，请分成小段再试。',
+};
+async function srvPost(path, body, timeout) {
+  const u = builtinUrl(); if (!u) throw new AIError(NOT_CONFIGURED_MSG, 'NOT_CONFIGURED');
+  if (!online()) throw new AIError('设备现在离线，内置 AI 需要联网。请联网后再试。', 'OFFLINE');
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), timeout + 5000);
+  let r;
+  try { r = await fetch(u + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, d: builtinDeviceId(), v: APP_VERSION }), signal: ac.signal, credentials: 'omit' }); }
+  catch (e) { throw e?.name === 'AbortError' ? new AIError('内置 AI 太久没有响应（超时），请稍后再试。', 'TIMEOUT') : new AIError('连不上自主学服务器的内置 AI（请检查网络后再试）。', 'NETWORK'); }
+  finally { clearTimeout(to); }
+  return r;
+}
+async function srvError(r) {
+  let j = null; try { j = await r.json(); } catch { }
+  const code = j?.code || 'error';
+  if (code === 'ai_off') { srv = { ...(srv || {}), enabled: false, at: Date.now() }; try { ls()?.setItem(SK, JSON.stringify(srv)); } catch { } }
+  return new AIError(SRV_MSG[code] || ('内置 AI 出错：' + (j?.error || ('HTTP ' + r.status))), 'SRV_' + code.toUpperCase());
+}
+/** 内置 AI 的错误：额度 / 花费上限 / 关闭 / 服务器出错（这些时候可以改用免费翻译） */
+export const isBuiltinFallback = e => /^SRV_|^NETWORK$|^TIMEOUT$/.test(e?.code || '');
+async function srvRun(task, args, timeout) {
+  const r = await srvPost('run', { task, args }, timeout);
+  if (!r.ok) throw await srvError(r);
+  const j = await r.json(); if (j?.r == null) throw new AIError('内置 AI 没有返回内容', 'BAD_FORMAT');
+  return j.r;
+}
+/** 内置 AI 语音：返回 mp3 Blob */
+export async function builtinSpeech({ text, voice, accent }) {
+  const r = await srvPost('speech', { text, voice, accent }, 30000);
+  if (!r.ok) throw await srvError(r);
+  const b = await r.blob(); if (!b.size) throw new AIError('内置 AI 语音返回了空音频', 'BAD_FORMAT'); return b;
+}
+/** 自己的密钥调用成功 / 失败次数（不含内容）顺带进匿名统计 */
+const ownStat = ok => import('./telemetry.js').then(T => T.track(ok ? 'ai_own_ok' : 'ai_own_fail')).catch(() => { });
+/** 跑一项 AI 功能：自己的密钥优先；没有就走内置 AI；都没有 → NOT_CONFIGURED */
+async function run(task, rawArgs) {
+  const b = P.build(task, rawArgs);
+  if (hasOwnKey()) {
+    try { const r = await chat(b.messages, { temperature: b.temperature, timeout: b.timeout }); ownStat(true); return r; }
+    catch (e) { if (e.code !== 'NOT_CONFIGURED') ownStat(false); throw e; }
+  }
+  if (builtinReady()) return srvRun(task, b.args, b.timeout);
+  throw new AIError(online() || !builtinUrl() || !srv?.enabled ? NOT_CONFIGURED_MSG : '设备现在离线，内置 AI 需要联网。', online() ? 'NOT_CONFIGURED' : 'OFFLINE');
+}
+
 const str = v => (typeof v === 'string' ? v.trim() : '');
 
 export async function testConnection() {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content: '请只返回 JSON：{"ok":true}' }], { timeout: 30000 });
+  const r = await chat(P.build('test').messages, { timeout: 30000 });
   if (r?.ok !== true) throw new AIError('已连通，但返回内容不符合预期', 'BAD_FORMAT');
   // 再试一句真实翻译，确认“翻译”功能可用
   const t = await translateBatch(['Good morning.'], 'en2zh');
@@ -100,9 +166,7 @@ export async function testConnection() {
 
 /** 用中文描述实际情景 → 英文情景对话。 */
 export async function generateScene(desc, { turns = 8 } = {}) {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `用户用中文描述了一个他实际遇到的情景：\n"""${desc}"""\n请写一段贴合该情景、口语地道的英文对话（约${turns}句），每句附中文翻译。` +
-    `返回 JSON：{"title":"中文标题","tags":["场景标签"],"sentences":[{"speaker":"说话人(英文，如 Doctor)","en":"英文句子","zh":"中文翻译"}]}` }]);
+  const r = await run('scene', { desc, turns });
   const ss = (r?.sentences || []).map(s => ({ speaker: str(s.speaker), en: str(s.en), zh: str(s.zh) })).filter(s => s.en);
   if (!ss.length) throw new AIError('AI 没有生成有效的对话，请换个描述再试', 'BAD_FORMAT');
   return { title: str(r.title) || '情景对话', tags: Array.isArray(r.tags) ? r.tags.map(str).filter(Boolean).slice(0, 4) : [], sentences: ss };
@@ -110,11 +174,7 @@ export async function generateScene(desc, { turns = 8 } = {}) {
 
 /** 从用户自己的句子里挑生词/短语并给中文释义。返回的词必须真实出现在对应句子中，否则丢弃。 */
 export async function generateCards(sentences) {
-  const list = sentences.map((s, i) => `${i}. ${s.en}`).join('\n');
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `下面是用户自己的英文句子（带序号）。请挑出对中文母语成年学习者最值得学的生词和固定短语（总共约${Math.min(12, Math.max(4, sentences.length))}个，宁少勿滥，不要太简单的词），` +
-    `给出该词在这个句子里的中文释义和 IPA 音标（单词才需要）。term 必须原样出现在对应句子里。\n${list}\n` +
-    `返回 JSON：{"cards":[{"i":句子序号,"term":"词或短语","type":"word|phrase","zh":"中文释义","phonetic":"音标或空"}]}` }]);
+  const r = await run('cards', { en: sentences.map(s => s.en) });
   const out = [];
   for (const c of r?.cards || []) {
     const i = Number(c.i), s = sentences[i]; const term = str(c.term), zh = str(c.zh);
@@ -128,9 +188,7 @@ export async function generateCards(sentences) {
 
 /** 地道表达：给一句话，给出更地道/不同语气的说法。 */
 export async function generateExpressions(sentence) {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `句子：${sentence.en}${sentence.zh ? '\n中文：' + sentence.zh : ''}\n请给出 3 种表达同一意思、母语者真会说的地道说法（可含口语/礼貌/简洁等不同语气），不改变事实和数字。` +
-    `返回 JSON：{"expressions":[{"en":"英文","zh":"中文","tone":"语气，如 口语/礼貌/简洁","note":"一句中文用法提示"}]}` }]);
+  const r = await run('expr', { en: sentence.en, zh: sentence.zh || '' });
   const ex = (r?.expressions || []).map(e => ({ en: str(e.en), zh: str(e.zh), tone: str(e.tone), note: str(e.note) })).filter(e => e.en);
   if (!ex.length) throw new AIError('AI 没有给出可用的表达，请重试', 'BAD_FORMAT');
   return ex;
@@ -140,8 +198,7 @@ export async function generateExpressions(sentence) {
 export async function fillTranslations(rows) {
   const need = rows.map((s, i) => ({ i, en: s.en, zh: s.zh })).filter(x => !x.zh || !x.en);
   if (!need.length) return [];
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `为下列每条补全缺失的那一种语言（缺 zh 就译成中文，缺 en 就译成地道英文），保留意思、数字和否定关系。\n${JSON.stringify(need)}\n返回 JSON：{"rows":[{"i":序号,"en":"英文","zh":"中文"}]}` }]);
+  const r = await run('fill', { need });
   const out = [];
   for (const x of r?.rows || []) { const i = Number(x.i); if (rows[i] && need.some(n => n.i === i)) out.push({ i, en: str(x.en), zh: str(x.zh) }); }
   if (!out.length) throw new AIError('AI 没有返回可用的翻译，请重试', 'BAD_FORMAT');
@@ -150,21 +207,14 @@ export async function fillTranslations(rows) {
 
 /** 单词/短语在句中的释义。 */
 export async function defineTerm(term, sentence) {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `句子：${sentence}\n请解释其中的 "${term}" 在这句话里的意思。返回 JSON：{"zh":"简洁中文释义","phonetic":"IPA 音标(单词才给，短语留空)"}` }]);
+  const r = await run('define', { term, sentence });
   const zh = str(r?.zh); if (!zh) throw new AIError('AI 没有返回释义', 'BAD_FORMAT');
   return { zh, phonetic: str(r.phonetic) };
 }
 
 /** 句子语法与翻译方法解析。返回结构里的“成分文本”必须真实出现在原句中，否则丢弃。 */
 export async function analyzeSentence(sentence) {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【语法分析】请为中国成年英语学习者分析下面这个句子，讲解要具体、简洁、用中文。\n句子：${sentence.en}${sentence.zh ? '\n参考译文：' + sentence.zh : ''}\n` +
-    `返回 JSON：{"structure":[{"text":"原句中的一段原文","role":"句子成分，如 主语/谓语/宾语/定语/状语/补语/从句","zh":"这一段的中文意思"}],` +
-    `"tense_voice":[{"label":"时态/语态/语气，如 一般过去时 被动语态","explain":"在这句里怎么判断"}],` +
-    `"grammar_points":[{"name":"语法点","explain":"解释"}],` +
-    `"translation_methods":[{"method":"翻译方法，如 语序调整/词性转换/拆句/合句/增译/省译/被动转主动","explain":"这句为什么/怎么用","before":"直译或原序","after":"调整后的自然中文"}],` +
-    `"natural_zh":"自然的中文译文"}` }]);
+  const r = await run('analyze', { en: sentence.en, zh: sentence.zh || '' });
   const arr = (a) => (Array.isArray(a) ? a : []);
   const low = sentence.en.toLowerCase().replace(/\s+/g, ' ');
   const out = {
@@ -180,11 +230,7 @@ export async function analyzeSentence(sentence) {
 
 /** 判断词在原句中用的是哪个义项（义项列表来自离线词典），并补例句。index 必须落在给定义项范围内，否则视为“无法判断”。 */
 export async function explainSense(term, sentence, senses) {
-  const list = senses.map((s, i) => `${i}. ${s.pos} ${s.zh}`).join('\n');
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【义项判断】句子：${sentence}\n词：${term}\n词典义项（带序号）：\n${list || '（词典没有该词）'}\n` +
-    `请判断“${term}”在这句话里用的是哪个义项（给序号；若都不贴切或词典没有，index 填 -1 并在 meaning 里给出你的解释），说明理由，并给 2 个体现该义项的英文例句（带中文）。` +
-    `返回 JSON：{"index":序号或-1,"meaning":"在本句中的中文意思","reason":"一句话理由","examples":[{"en":"例句","zh":"中文"}]}` }]);
+  const r = await run('sense', { term, sentence, senses });
   let idx = Number(r?.index); if (!Number.isInteger(idx) || idx < -1 || idx >= senses.length) idx = -1;
   const examples = (Array.isArray(r?.examples) ? r.examples : []).map(e => ({ en: str(e.en), zh: str(e.zh) })).filter(e => e.en);
   const meaning = str(r?.meaning);
@@ -194,9 +240,7 @@ export async function explainSense(term, sentence, senses) {
 
 /** 【逐句翻译】texts: string[]，dir: 'en2zh'|'zh2en'。返回等长译文数组；条数不对或缺项视为失败。 */
 export async function translateBatch(texts, dir) {
-  const to = dir === 'en2zh' ? '简体中文（自然、准确，保留人名地名）' : '地道自然的英文（适合中国学习者模仿，保留意思、数字和否定关系）';
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【逐句翻译】把下面 JSON 数组里的每一句分别译成${to}。一句对一句，不要合并、拆分或省略。\n${JSON.stringify(texts)}\n返回 JSON：{"t":["第1句译文","第2句译文",...]}，数组长度必须是 ${texts.length}。` }], { temperature: 0.2 });
+  const r = await run('translate', { texts, dir });
   const t = Array.isArray(r?.t) ? r.t.map(str) : [];
   if (t.length !== texts.length || t.some(x => !x)) throw new AIError('AI 返回的译文条数不对，请重试', 'BAD_FORMAT');
   return t;
@@ -204,11 +248,7 @@ export async function translateBatch(texts, dir) {
 
 /** v1.6【译文对齐】拆分一句时：把已有的整句译文按原文各段切开（不重新翻译，只在必要时微调连接词/标点）。返回等长数组。 */
 export async function alignSplit(srcPieces, other, dir = 'en2zh') {
-  const lang = dir === 'en2zh' ? '中文' : '英文';
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【译文对齐】一句原文被用户拆成了 ${srcPieces.length} 段，它原来有一整句${lang}译文。请把这句译文按原文的分段切成对应的 ${srcPieces.length} 段：每段只包含对应那段原文的意思。` +
-    `尽量直接切开原译文、保留原用字；只有语序必须调整时才微调措辞，不要重新翻译、不要遗漏或增加意思。\n原文各段：${JSON.stringify(srcPieces)}\n原译文：${other}\n` +
-    `返回 JSON：{"t":["第1段译文",...],"changed":是否改动了措辞(true/false)}，数组长度必须是 ${srcPieces.length}。` }], { temperature: 0.1, timeout: 60000 });
+  const r = await run('align', { pieces: srcPieces, other, dir });
   const t = Array.isArray(r?.t) ? r.t.map(str) : [];
   if (t.length !== srcPieces.length || t.some(x => !x)) throw new AIError('AI 返回的分段条数不对', 'BAD_FORMAT');
   return { t, changed: !!r.changed };
@@ -216,10 +256,7 @@ export async function alignSplit(srcPieces, other, dir = 'en2zh') {
 
 /** v1.6【作答判分】翻译题：判断学习者的译文意思对不对（意思对、说法不同也算对）。返回 {score 0-100, ok, comment, better}。 */
 export async function judgeTranslation({ src, ref = '', answer, dir }) {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【作答判分】学习者在做${dir === 'en2zh' ? '英译中' : '中译英'}练习。原文：${src}\n${ref ? '参考译文：' + ref + '\n' : ''}学习者的答案：${answer}\n` +
-    `请只看意思是否准确完整（不要求和参考译文字面一致；口语、同义说法都算对；漏掉关键信息、否定/时态/主语弄反算错）。` +
-    `返回 JSON：{"score":0-100的整数,"ok":true或false,"comment":"一句中文点评（指出漏掉或弄错的地方）","better":"更好的说法（可选）"}` }], { temperature: 0.1, timeout: 45000 });
+  const r = await run('judge', { src, ref, answer, dir });
   const score = Math.max(0, Math.min(100, Math.round(+r?.score)));
   if (!Number.isFinite(score)) throw new AIError('AI 没有给出分数', 'BAD_FORMAT');
   return { score, ok: typeof r.ok === 'boolean' ? r.ok : score >= 70, comment: str(r.comment), better: str(r.better) };
@@ -227,9 +264,5 @@ export async function judgeTranslation({ src, ref = '', answer, dir }) {
 
 /** v1.6【阅读理解出题】给一段用户自己材料里的英文（2–4 句），出一道中文的理解选择题。返回 {q, options[], answer(下标), why}（格式由调用方检查）。 */
 export async function passageQuiz(en, zh = '') {
-  const r = await chat([{ role: 'system', content: SYS }, { role: 'user', content:
-    `【阅读理解出题】下面是学习者自己材料里的一小段英文${zh ? '（附参考译文）' : ''}。请出一道考“读懂这段话”的单选题：问题和选项都用简体中文，` +
-    `考段落的要点、细节、因果或推断（不要考单个词的字面翻译，不要出原文没有依据的题）；4 个选项，只有 1 个正确，干扰项要看起来合理但和原文不符。\n` +
-    `英文：${en}\n${zh ? '参考译文：' + zh + '\n' : ''}返回 JSON：{"q":"问题","options":["A","B","C","D"],"answer":正确选项的下标(0-3),"why":"一句话说明依据（引用原文）"}` }], { temperature: 0.3, timeout: 60000 });
-  return r;
+  return run('pquiz', { en, zh });
 }
