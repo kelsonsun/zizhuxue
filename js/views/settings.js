@@ -44,6 +44,7 @@ export async function render(root) {
     <div class="row gap wrap"><a class="btn" href="#/achieve" id="meAch">🏆 成就</a><a class="btn" href="#/vocab" id="meVocab">📊 词汇量统计</a><button class="btn" id="qkHistMe">🔎 查词翻译历史</button></div>
     <button class="btn" id="tourAgain">🧭 重新观看新手引导</button></section>
 
+  <section class="card" id="licCard"></section>
   <section class="card" id="remindCard"><h2>⏰ 学习提醒</h2>
     <label class="check switch"><input type="checkbox" id="remTog" ${settings.remindOn ? 'checked' : ''}> <b>每天按时提醒我学习</b></label>
     <div class="field"><label for="remAt">提醒时间</label><input type="time" id="remAt" value="${esc(settings.remindAt || '20:00')}" step="300"></div>
@@ -180,13 +181,14 @@ export async function render(root) {
   chromeStatus('en2zh').then(st => { E('#csnow').textContent = { available: '可用（语言包已下载）', downloadable: '可用（首次需下载语言包）', downloading: '可用（语言包下载中）', unavailable: '不可用', none: '不支持' }[st] || st; });
   fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
   E('#asr').onchange = e => saveSettings({ useAsr: e.target.checked });
+  import('./unlock.js').then(U => U.mountCard(E('#licCard'))).catch(e => console.warn('license', e)); // v1.9 会员与激活
   E('#exp').onclick = async () => { download(`自主学备份_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await db.exportAll(), null, 1)); toast('已导出（不含 AI 密钥）'); };
   const doImport = (mode) => async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
       if (mode === 'replace' && !(await confirmDlg('覆盖导入会清除当前所有材料和卡片，换成备份里的内容。确定吗？', { ok: '覆盖', danger: true }))) return;
-      const r = await db.importAll(data, { mode }); toast(`已导入：${r.materials} 份材料、${r.cards} 张卡片`); render(root);
+      const r = await db.importAll(data, { mode }); await (await import('../license.js')).load(true); toast(`已导入：${r.materials} 份材料、${r.cards} 张卡片`); render(root);
     } catch (err) { toast('导入失败：' + err.message, 5000); }
     e.target.value = '';
   };

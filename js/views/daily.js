@@ -66,7 +66,8 @@ export async function mountDaily(box) {
       tts.speak(s.en, { rate: settings.rate }).catch(e => toast(e.message));
     };
     $('#dStar', box).onclick = async () => { await db.cards.save(makeCard({ type: 'sentence', term: s.en, zh: s.zh, sentence: { en: s.en, zh: s.zh }, material: s.materialId, sentenceId: s.id, source: 'daily' })); toast('已收藏句子，会进入每日复习'); draw(); };
-    $('button#dDone', box)?.addEventListener('click', async () => { const log = await dailyLog(); const t = dayNumber(); log[t] = { ...(log[t] || { id: s.id, mid: s.materialId }), done: true }; await db.meta.set('dailyLog', log); toast('每日一句完成，打卡进度 +1'); await draw(); import('../celebrate.js').then(C => C.checkProgress()).then(a => { if (a?.goalGot) draw(); }).catch(() => { }); });
+    $('button#dDone', box)?.addEventListener('click', async () => { if ((await (await import('../license.js')).info()).locked) { location.hash = '#/unlock'; return; } // v1.9 试用用完不能打卡学习
+ const log = await dailyLog(); const t = dayNumber(); log[t] = { ...(log[t] || { id: s.id, mid: s.materialId }), done: true }; await db.meta.set('dailyLog', log); toast('每日一句完成，打卡进度 +1'); await draw(); import('../celebrate.js').then(C => C.checkProgress()).then(a => { if (a?.goalGot) draw(); }).catch(() => { }); });
     $('#dNext', box)?.addEventListener('click', () => draw(true));
   };
   onDestroy(() => au?.pause());

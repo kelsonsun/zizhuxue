@@ -16,6 +16,7 @@ export async function render(root) {
   root.innerHTML = `
   <header class="top"><h1>自主学</h1><button class="btn fbtop" id="fbHome" aria-label="反馈问题或提建议">🐞 反馈</button><span class="muted">用你自己的真实内容学英语 · 遇到问题或有想法，点右上角「反馈」告诉我们</span></header>
   ${inApp ? `<div class="card warnbox" id="inAppTip"><b>⚠️ 请用浏览器打开</b><p>${esc(inst.howText())}</p><button class="btn primary" id="copyLink">复制链接</button></div>` : ''}
+  <div id="licBox"></div>
   <div id="quickBox"></div>
   <div id="dailyBox"></div>
   <section class="card hero">
@@ -37,6 +38,7 @@ export async function render(root) {
   <div class="list">${top.slice(0, 4).map(m => `<a class="item" href="${m.kind === 'book' ? '#/book/' : '#/lesson/'}${m.id}"><b>${m.kind === 'book' ? '📖 ' : ''}${esc(m.title)}</b><span class="muted">${m.kind === 'book' ? mats.filter(x => x.bookId === m.id).length + ' 章' : m.sentences.length + ' 句'} · ${fmtDate(m.updatedAt)}${m.sample ? ' · 示例' : ''}</span></a>`).join('') || '<p class="muted">暂无材料</p>'}</div>
   <div id="installBox"></div>
   <p class="muted small privacy">🔒 你的内容只保存在这台设备的浏览器里。只有你主动使用 AI 或确认使用公共翻译时，相关句子才会发出去。</p>`;
+  import('./unlock.js').then(U => U.mountBanner($('#licBox', root))).catch(e => console.warn('license', e)); // v1.9 试用剩余 / 到期提醒
   import('./quickbox.js').then(async q => { const qb = await q.mountQuick($('#quickBox', root)); if (session.quickQ) { const t = session.quickQ; session.quickQ = null; qb.run(t); } }).catch(e => console.warn(e)); // v1.8 分享来的词句直接查
   import('./daily.js').then(d => d.mountDaily($('#dailyBox', root))).catch(e => console.warn(e));
   $('#fbHome', root).onclick = async () => (await import('../feedbackui.js')).openFeedback();
