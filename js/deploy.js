@@ -13,5 +13,7 @@ export const TELEMETRY_URL = API_BASE + 'telemetry'; // 留空 = 不上报
 export const FEEDBACK_URL = API_BASE + 'feedback';   // 留空 = 反馈只能用邮件 / 复制 / 分享发出去
 // v1.9.4 内置 AI：没填自己密钥的用户经服务器代理用 AI（密钥只在服务器上）。留空 = 没有内置 AI（只能自己填密钥）。
 export const AI_URL = API_BASE + 'ai/';
+// v1.10 付费与推荐（价格、邀请、优惠码、下单）。留空 = 没有服务器，价格页仍显示默认价格表，但不能邀请 / 核销。
+export const BILLING_URL = API_BASE + 'billing/';
 // v1.6 反馈收件邮箱：「反馈问题/建议」里“用邮件发送”的收件人。还没定 → 留空（邮件 App 打开后自己填收件人）。定了只改这里。
 export const FEEDBACK_EMAIL = '';

@@ -24,3 +24,5 @@ export const telemetryUrl = (o = runtime()) => allowed(D.TELEMETRY_URL || '', o)
 export const feedbackUrl = (o = runtime()) => allowed(D.FEEDBACK_URL || '', o);
 /** v1.9.4 内置 AI（服务器代理）地址：deploy.js 的 AI_URL（末尾带 /），同样的过滤规则 */
 export const aiUrl = (o = runtime()) => { const u = allowed(D.AI_URL || '', o); return u && !u.endsWith('/') ? u + '/' : u; };
+/** v1.10 付费 / 推荐接口（末尾带 /），同样的过滤规则 */
+export const billingUrl = (o = runtime()) => { const u = allowed(D.BILLING_URL || '', o); return u && !u.endsWith('/') ? u + '/' : u; };

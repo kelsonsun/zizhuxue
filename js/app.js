@@ -28,6 +28,8 @@ const routes = {
   shared: () => import('./views/shared.js'),
   bilingual: () => import('./views/bilingual.js'),
   unlock: () => import('./views/unlock.js'),
+  pay: () => import('./views/pay.js'),
+  invite: () => import('./views/invite.js'),
 };
 const TABS = [['', '今日', '🏠'], ['import', '导入', '➕'], ['library', '材料库', '📚'], ['review', '复习', '🔁'], ['me', '我的', '👤']];
 let cleanup = null, navSeq = 0;

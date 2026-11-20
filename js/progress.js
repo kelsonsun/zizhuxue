@@ -32,6 +32,8 @@ export async function afterProgress() {
       const m = await grant({ kind: 'milestone', key: R.milestoneKey(info.streak, today), ms: info.streak, label: `连续 ${info.streak} 天里程碑` });
       if (m.got.s) milestone = { ...R.milestoneTheme(info.streak), got: m.got };
     }
+    // v1.10：达标日上报给服务器，用于邀请「首周打卡」（没登录或没开通则静默跳过）
+    import('./pay.js').then(pay => { if (!pay.token()) return; const ymd = new Date(today * 86400000).toISOString().slice(0, 10); return pay.reportCheckin(ymd, info.today, info.goal); }).catch(() => { });
   }
   return { info, goalGot, milestone };
 }
