@@ -107,7 +107,9 @@ export async function render(root) {
     <li>不绑定云同步时，内容只存在本机浏览器，没有账号、不联网。绑定后，材料、生词卡和复习记录会存到你填的同步服务器（AI 密钥和录音不会上传）。</li>
     <li>只有你点「AI」按钮时，相关句子才会发到你配置的 AI 服务。</li>
     <li>只有你确认使用「MyMemory 公共翻译」时，要翻译的句子才会发给 MyMemory。</li>
-    <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li></ul></details></section>
+    <li>跟读录音只在内存里，关页面即清除；浏览器自带的语音识别可能由浏览器厂商的服务处理，请留意。</li>
+    <li>匿名使用统计：只有连着自主学服务器时，才会发“一台匿名设备今天打开 / 导入 / 学习 / 分享过”和来源类型、版本，用来知道有多少人在用；不发任何学习内容、材料、姓名、邮箱。</li></ul>
+    <label class="row gap"><input type="checkbox" id="telOn"> 发送匿名使用统计</label></details></section>
 
   <section class="card" id="aboutCard"><details class="help sec" id="hAbout"><summary><h2>关于</h2></summary><p class="muted small">自主学 v${APP_VERSION}（版本 <span id="ver">…</span>）· 离线词典 ECDICT（MIT）· 识别 Tesseract.js（Apache-2.0）· PDF.js（Apache-2.0）· mammoth（BSD-2）</p></details></section>`;
   { const FU = await import('../feedbackui.js'); FU.mountHistory($('#fbBox', root)); $('#fbTop', root).onclick = () => FU.openFeedback({}, { onClose: () => FU.mountHistory($('#fbBox', root)) }); }
@@ -184,6 +186,8 @@ export async function render(root) {
   fetch('precache.json').then(r => r.json()).then(j => { E('#ver').textContent = j.version; }).catch(() => { E('#ver').textContent = '未知'; });
   E('#asr').onchange = e => saveSettings({ useAsr: e.target.checked });
   import('./unlock.js').then(U => U.mountCard(E('#licCard'))).catch(e => console.warn('license', e)); // v1.9 会员与激活
+  // v1.9.2 匿名使用统计开关
+  import('../telemetry.js').then(T => { const c = E('#telOn'); if (!c) return; c.checked = T.enabled(); c.onchange = () => { T.setEnabled(c.checked); toast(c.checked ? '已开启匿名使用统计' : '已关闭匿名使用统计，不会再发'); }; }).catch(() => { });
   // v1.9.1 分享给朋友：本地画分享卡片图（带二维码）；复制链接
   E('#shareAppGo').onclick = () => import('../sharecard.js').then(m => m.openShareCard()).catch(e => toast('生成分享图没成功：' + e.message));
   E('#shareAppCopy').onclick = () => import('../sharecard.js').then(async m => toast(await m.copyLink() ? '已复制链接：' + m.SHARE_URL : '复制没成功：' + m.SHARE_URL));
