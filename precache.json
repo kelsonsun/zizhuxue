@@ -1,5 +1,5 @@
 {
- "version": "ee9e8d21f9",
+ "version": "116c2bf53c",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -36,8 +36,10 @@
   "js/matdelete.js",
   "js/nlp.js",
   "js/offmode.js",
+  "js/pay.js",
   "js/pdfbook.js",
   "js/practice.js",
+  "js/pricetable.js",
   "js/progress.js",
   "js/recorder.js",
   "js/remind.js",
@@ -80,8 +82,10 @@
   "js/views/drillrun.js",
   "js/views/home.js",
   "js/views/import.js",
+  "js/views/invite.js",
   "js/views/lesson.js",
   "js/views/library.js",
+  "js/views/pay.js",
   "js/views/quickbox.js",
   "js/views/quiz.js",
   "js/views/review.js",
