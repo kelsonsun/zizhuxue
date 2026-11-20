@@ -358,3 +358,11 @@ details.help.sec>summary{color:inherit}details.help.sec>summary h2{margin:0}deta
 .mini.retr{color:var(--ac);border-color:var(--ac);font-weight:600}
 .ptools{flex-wrap:wrap}.sfield{margin:0 0 6px}.sfield .btn{flex:1}
 @media (pointer:coarse){html .sent .mini[data-edit],html .mini.retr,html .phead .mini[data-pedit]{min-height:44px;min-width:44px}}
+
+/* v1.10 价格与推荐 */
+.prices{list-style:none;padding:0;margin:8px 0}
+.prices .price{border:1px solid var(--line,#ddd);border-radius:12px;padding:12px 14px;margin:8px 0;cursor:pointer;min-height:44px}
+.prices .price.on{border-color:var(--ac,#1f6f5c);background:#f2faf7}
+.prices .pp{float:right;font-weight:700;color:var(--ac,#1f6f5c)}
+#refCoupons{padding-left:1.2em}
+#refCoupons li{margin:4px 0}
