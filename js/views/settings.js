@@ -17,6 +17,9 @@ import * as tts from '../tts.js';
 const OFFLINE_ASSETS = ['vendor/tesseract/tesseract.min.js', 'vendor/tesseract/worker.min.js', 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js', 'vendor/tesseract/core/tesseract-core-lstm.wasm.js', 'vendor/tesseract/lang/eng.traineddata.gz', 'vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/mammoth/mammoth.browser.min.js'];
 
 /** v1.7：说明类文字一律可折叠（默认收起，只显示标题；点标题展开 / 收起） */
+/** v1.9.4 AI 设置的状态文字 */
+const aiTag = () => ai.hasOwnKey() ? '已配置' : ai.usingBuiltin() ? '已内置AI' : '未配置';
+const aiLine = () => ai.hasOwnKey() ? '正在用你自己填的密钥（优先于内置 AI）。清除密钥后自动改用内置 AI。' : ai.usingBuiltin() ? '✓ 已内置AI，打开即用，不用设置；可选填自己的密钥（填了就优先用你的）。' : ai.builtinUrl() ? (navigator.onLine === false ? '现在离线，内置 AI 联网后才能用；也可以填自己的密钥。' : '内置 AI 暂时不可用，可以填自己的密钥使用。') : '可以填自己的密钥使用 AI 功能。';
 const help = (title, html, id = '') => `<details class="help"${id ? ` id="${id}"` : ''}><summary>${title}</summary><div class="helpb">${html}</div></details>`;
 
 export async function render(root) {
@@ -27,8 +30,9 @@ export async function render(root) {
   <section class="card sharecard" id="shareCard"><h2>📣 分享给朋友</h2><p class="small">生成一张带二维码的分享卡片图：发微信、朋友圈、任何聊天软件都行，朋友长按识别或扫码就能打开。</p>
     <div class="row gap wrap"><button class="btn primary" id="shareAppGo">🖼 生成分享卡片图</button><button class="btn" id="shareAppCopy">🔗 复制链接</button></div></section>
 
-  <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${ai.isConfigured() ? '已配置' : '未配置'}</span></h2>
-    ${help('说明：AI 接口怎么填、密钥存在哪', `<p class="muted small">填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>`, 'hAi')}
+  <section class="card"><h2>AI 设置 <span class="tag ${ai.isConfigured() ? 'okt' : ''}" id="aist">${aiTag()}</span></h2>
+    <p class="small" id="aiBuiltin">${aiLine()}</p>
+    ${help('说明：内置 AI 和自己的密钥', `<p class="muted small"><b>内置 AI</b>：不用填任何东西，打开就能用（翻译、生词卡、地道表达、情景对话、语法解析、测验判分、AI 语音等）。你的文字会经自主学服务器发给 AI 服务商处理，翻译等结果会在服务器上缓存（不记录是谁），每台设备每天 / 每月有免费额度；用完或服务器 AI 不可用时，翻译会自动改用免费的 MyMemory 机器翻译，其他 AI 功能会提示原因。离线时不能用。录音 / 视频的 AI 转写不走内置 AI（文件大），可以用「本机免费转写」或填自己的密钥。<br>内置 AI 翻译整份材料时按学习进度，一次先翻接下来的 30 句，学到后面再继续，不一次翻完。</p><p class="muted small"><b>自己的密钥（可选）</b>：填入兼容 OpenAI 的接口（地址以 /v1 结尾，例如 https://api.openai.com/v1），自动生成情景对话、词卡、地道表达都靠它。<b>密钥只保存在这台设备的浏览器里</b>，不会进入备份文件，也不会发给本软件以外的任何人；调用时你的文字会直接发到你填的这个地址。部分 AI 服务不允许浏览器直接访问（CORS），那样会提示连接失败。</p>`, 'hAi')}
     <div class="field"><label for="ab">接口地址</label><input id="ab" value="${esc(c.baseUrl || ai.DEFAULT_BASE)}" placeholder="https://api.openai.com/v1" inputmode="url" autocapitalize="off" autocomplete="off"></div>
     <div class="field"><label for="ak">密钥（API Key）</label><input id="ak" type="password" value="${esc(c.apiKey)}" placeholder="sk-…" autocomplete="off"></div>
     <div class="field"><label for="am">模型</label><input id="am" value="${esc(c.model || ai.DEFAULT_MODEL)}" placeholder="例如 gpt-4o-mini" autocapitalize="off" autocomplete="off"></div>
@@ -118,16 +122,17 @@ export async function render(root) {
   const qs = new URLSearchParams(location.hash.split('?')[1] || ''); // 扫配对二维码打开：#/me?pair=CODE&srv=URL
   if (qs.get('pair')) { history.replaceState(null, '', '#/me'); bindSheet(root, { pair: qs.get('pair'), url: qs.get('srv') || '' }); }
   const read = () => ({ baseUrl: E('#ab').value, apiKey: E('#ak').value, model: E('#am').value, asrModel: E('#asrm').value.trim() || 'whisper-1' });
-  const refresh = () => { E('#aist').textContent = ai.isConfigured() ? '已配置' : '未配置'; E('#aist').classList.toggle('okt', ai.isConfigured()); };
+  const refresh = () => { E('#aist').textContent = aiTag(); E('#aist').classList.toggle('okt', ai.isConfigured()); E('#aiBuiltin').textContent = aiLine(); };
+  addEventListener('zzx-ai-status', () => { if (E('#aist')) refresh(); }, { once: true });
   const saveAi = async () => { const r0 = read(); await ai.saveConfig(r0); const c2 = ai.getConfig(); // 只回填用户没在这期间改过的框，避免覆盖正在输入的内容
     if (E('#ab').value === r0.baseUrl) E('#ab').value = c2.baseUrl; if (E('#am').value === r0.model) E('#am').value = c2.model; if (E('#ak').value === r0.apiKey) E('#ak').value = c2.apiKey; refresh(); if (E('#vsys')) drawVoice(); };
-  E('#asave').onclick = async () => { await saveAi(); E('#amsg').textContent = ai.isConfigured() ? '已保存（仅存本机）。地址已自动规范为 ' + ai.getConfig().baseUrl + '。建议点「测试连接」确认。' : '请填写密钥（地址和模型可用默认值）。'; };
+  E('#asave').onclick = async () => { await saveAi(); E('#amsg').textContent = ai.hasOwnKey() ? '已保存（仅存本机）。地址已自动规范为 ' + ai.getConfig().baseUrl + '。建议点「测试连接」确认。' : '请填写密钥（地址和模型可用默认值）。'; };
   // 填完离开输入框就自动保存（以前只有点「保存」才生效，容易以为填了却没保存）
   ['#ab', '#ak', '#am', '#asrm'].forEach(id => E(id).addEventListener('change', () => { if (E('#ak').value.trim()) saveAi().then(() => { E('#amsg').textContent = '已自动保存（仅存本机）。'; }); }));
   E('#aclear').onclick = async () => { await ai.clearConfig(); E('#ak').value = ''; E('#ab').value = ai.DEFAULT_BASE; E('#am').value = ai.DEFAULT_MODEL; refresh(); E('#amsg').textContent = '已清除。'; };
   E('#atest').onclick = async () => {
     await saveAi(); const m = E('#amsg');
-    if (!ai.isConfigured()) { m.textContent = '未配置AI，无法测试：请填写密钥。'; return; }
+    if (!ai.hasOwnKey()) { m.textContent = ai.usingBuiltin() ? '这里测试的是你自己的密钥：请先填写密钥。（不填也能用内置 AI）' : '未配置AI，无法测试：请填写密钥。'; return; }
     m.textContent = '测试中…（会发 2 个很短的请求）'; const b = E('#atest'); b.disabled = true;
     try { const r = await ai.testConnection(); m.textContent = `✓ 连接成功，AI 可以使用（翻译也可以）。地址 ${r.baseUrl} · 模型 ${r.model} · 试译 “Good morning.” → ${r.sample}`; }
     catch (e) { m.textContent = '✗ ' + e.message; } finally { b.disabled = false; }
@@ -140,8 +145,8 @@ export async function render(root) {
       ${list.length ? '' : `<p class="muted small">${tts.supported() ? '这台设备上暂时没有这个口音的英语声音，会用其他英语声音朗读。' : '这个浏览器不支持系统朗读。'}</p>`}`;
     const ci = await tts.cacheInfo();
     E('#vai').innerHTML = settings.ttsEngine === 'ai' && ai.isConfigured() ? `<div class="field"><label for="vaiv">AI 声音</label><select id="vaiv">${tts.AI_VOICES.map(v => `<option ${(settings.aiVoice || 'coral') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-      <div class="field"><label for="vaim">语音模型</label><input id="vaim" value="${esc(settings.aiTtsModel || tts.AI_TTS_MODEL)}" autocapitalize="off" autocomplete="off"></div>
-      <p class="muted small">${/^gpt-4o/i.test(settings.aiTtsModel || tts.AI_TTS_MODEL) ? '口音通过语音指令实现（gpt-4o 系列支持）。' : '这个模型不支持指定口音，口音设置只对系统语音生效。'}本机已缓存 ${ci.count} 段（${(ci.bytes / 1048576).toFixed(1)} MB）。AI 语音失败时会提示原因并自动改用系统语音。</p>
+      ${ai.hasOwnKey() ? `<div class="field"><label for="vaim">语音模型</label><input id="vaim" value="${esc(settings.aiTtsModel || tts.AI_TTS_MODEL)}" autocapitalize="off" autocomplete="off"></div>` : ''}
+      <p class="muted small">${!ai.hasOwnKey() ? '正在用内置 AI 语音（服务器上有缓存，同一句不重复生成）。' : /^gpt-4o/i.test(settings.aiTtsModel || tts.AI_TTS_MODEL) ? '口音通过语音指令实现（gpt-4o 系列支持）。' : '这个模型不支持指定口音，口音设置只对系统语音生效。'}本机已缓存 ${ci.count} 段（${(ci.bytes / 1048576).toFixed(1)} MB）。AI 语音失败时会提示原因并自动改用系统语音。</p>
       <button class="btn" id="vclr">清除语音缓存</button>` : '';
     E('#vname')?.addEventListener('change', e => saveSettings({ voiceName: e.target.value }));
     E('#vaiv')?.addEventListener('change', e => saveSettings({ aiVoice: e.target.value }));

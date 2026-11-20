@@ -23,7 +23,7 @@ export async function render(root, [id]) {
     pcm = r.pcm; session.asr = { id, pcm };
   }
   const dur = pcm.length / T.SR, size = b.blob.size;
-  const hasAi = ai.isConfigured();
+  const hasAi = ai.hasOwnKey(); // v1.9.4 内置 AI 不做语音转写（大文件上传不适合走服务器），只有自己的密钥才有 AI 转写
   let engine = hasAi ? 'api' : 'local', mk = T.LOCAL_MODELS[localStorage.getItem(PREF)] ? localStorage.getItem(PREF) : T.DEFAULT_LOCAL;
   const cached = { fast: await T.isCached('fast'), accurate: await T.isCached('accurate') };
   const durTxt = `${dur < 60 ? Math.round(dur) + ' 秒' : (dur / 60).toFixed(dur < 1200 ? 1 : 0) + ' 分钟'}`;

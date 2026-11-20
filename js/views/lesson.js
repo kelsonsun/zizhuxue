@@ -303,7 +303,7 @@ export async function render(root, [id], params = {}) {
     try {
       const n = await SE.retranslate(list, { provider: prov, translate: TR.translateTexts });
       const all = await db.cards.all(); for (const s of list) for (const c of SE.syncCards(all, s)) await db.cards.save(c);
-      await db.materials.save(m); toast(`已重新翻译 ${n} 句（${SHORT[prov]}，可再改）`);
+      await db.materials.save(m); toast(`已重新翻译 ${n} 句（${SHORT[SE.retranslate.via || prov]}，可再改）`);
     } catch (e) { toast('重新翻译失败：' + e.message + '。原来的译文没有改动，可以稍后再点「重新翻译」', 6000); }
     st.busy = false; draw();
   }

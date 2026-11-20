@@ -106,7 +106,7 @@ export async function render(root) {
       try {
         const src = plan.pieces.map(p => p.text); const out = await TR.translateTexts(prov, src, dir);
         if (out.some((t, k) => !TR.plausible(src[k], t, dir))) throw new Error('有的段没有翻译出来');
-        aiTok++; aiBusy = false; zov = { texts: out, how: 'mt:' + prov }; zcuts = null; toast(`已重新翻译 ${out.length} 段（${TR.SHORT[prov]}，请核对）`);
+        aiTok++; aiBusy = false; zov = { texts: out, how: 'mt:' + (out.via || prov) }; zcuts = null; toast(`已重新翻译 ${out.length} 段（${TR.SHORT[out.via || prov]}，请核对）`);
       } catch (e) { toast((TR.SHORT[prov] || prov) + '失败：' + e.message, 5000); }
       mtBusy = ''; drawSplit();
     });

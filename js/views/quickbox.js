@@ -26,9 +26,9 @@ async function mt(text, dir, prov) {
     session.mmOk = true;
   }
   if (prov === 'chrome') await TR.chromePrepare(dir);
-  const [t] = await TR.translateTexts(prov, [text], dir);
+  const res = await TR.translateTexts(prov, [text], dir); const [t] = res;
   if (!TR.plausible(text, t || '', dir)) throw new Error('翻译结果看起来不对（' + (t ? '原样返回或语言不符' : '没有结果') + '）');
-  return t.trim();
+  return { t: t.trim(), via: res.via || prov };
 }
 /** 查询：返回可存进历史的结果 {q, kind, dir, word?, rev?, tr?, prov} */
 export async function query(q, { prov } = {}) {
@@ -43,7 +43,7 @@ export async function query(q, { prov } = {}) {
   }
   const dir = kind === 'zh' || kind === 'zhword' ? 'zh2en' : 'en2zh';
   const p = prov || (await providers())[0];
-  return { q: s, kind, dir, tr: await mt(s, dir, p), prov: p };
+  const r = await mt(s, dir, p); return { q: s, kind, dir, tr: r.t, prov: r.via };
 }
 
 /**
