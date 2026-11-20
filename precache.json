@@ -1,5 +1,5 @@
 {
- "version": "8df4701d30",
+ "version": "144f32f092",
  "files": [
   "css/app.css",
   "data/dict.tsv",
@@ -46,6 +46,7 @@
   "js/rootdata.js",
   "js/roots.js",
   "js/sense.js",
+  "js/sentedit.js",
   "js/share.js",
   "js/sharecard.js",
   "js/sm2.js",
