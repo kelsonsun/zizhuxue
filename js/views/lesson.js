@@ -14,6 +14,8 @@ import { paragraphs, paraIndexOf, progressOf, markDone, touchLast, isBook } from
 import { openWordSheet, openPractice, toggleStar } from '../tools.js';
 import { openTranslate, statusHtml } from '../transui.js';
 import { SHORT } from '../translate.js';
+import * as TR from '../translate.js';
+import * as SE from '../sentedit.js';
 
 const LEVELS = [['chapter', '章'], ['para', '段'], ['sent', '句'], ['word', '词']];
 
@@ -30,7 +32,7 @@ export async function render(root, [id], params = {}) {
   const si = Math.min(Math.max(+params.si || 0, 0), Math.max(N - 1, 0));
   const groups = paragraphs(m); const pi = paraIndexOf(m, si); const grp = groups[pi] || { start: 0, end: N - 1 };
   const range = lv === 'sent' || lv === 'word' ? [si, si] : lv === 'para' ? [grp.start, grp.end] : [0, N - 1];
-  const st = { rate: settings.rate, loopOne: false, loopAll: false, showZh: settings.showZh, orig: false, tok: 0, cur: -1 };
+  const st = { edit: null, busy: false, rate: settings.rate, loopOne: false, loopAll: false, showZh: settings.showZh, orig: false, tok: 0, cur: -1 };
   const ctx = { m, rate: () => st.rate, refresh: () => draw(), hasOrig: s => hasOrig(s), playOrig: (s, rate) => { st.tok++; tts.cancel(); return playOrig(s, rate ?? st.rate); } };
   const cards = () => db.cards.all().then(a => a.filter(c => c.materialId === m.id));
   let au = null;
@@ -45,12 +47,23 @@ export async function render(root, [id], params = {}) {
     ${LEVELS.map(([k, t]) => `<a class="lvl ${lv === k ? 'on' : ''}" data-lvl="${k}" href="${url(k, si)}">${t}</a>`).join('')}</nav>
     <div class="crumb muted small">${book ? `《${esc(book.title)}》 › ` : ''}${esc(m.title)}${lv !== 'chapter' ? ` › 第 ${pi + 1}/${groups.length} 段` : ''}${lv === 'sent' || lv === 'word' ? ` › 第 ${si + 1}/${N} 句` : ''}</div>` : '';
 
+  // v1.9.3 已保存的教材随时可改：逐句 ✏️ / 逐段「编辑本段」；改完旁边出现「重新翻译」（只有点了才翻译）
+  const editing = i => st.edit && (st.edit.kind === 's' ? st.edit.i === i : i >= groups[st.edit.gi].start && i <= groups[st.edit.gi].end);
+  const EDW = { en: '英文', zh: '中文', both: '中英文' };
+  const editHtml = (s, i, solo = st.edit?.kind === 's') => `<div class="sedit" role="group" aria-label="编辑第${i + 1}句">
+      <label class="small muted" for="ee${i}">英文</label><textarea id="ee${i}" data-ef="en" rows="2" lang="en" aria-label="第${i + 1}句英文">${esc(s.en || '')}</textarea>
+      <label class="small muted" for="ez${i}">中文</label><textarea id="ez${i}" data-ef="zh" rows="2" lang="zh" aria-label="第${i + 1}句中文">${esc(s.zh || '')}</textarea>
+      ${solo ? `<div class="row gap"><button class="btn" data-ecancel>取消</button><button class="btn primary grow" data-esave>保存修改</button></div>` : ''}</div>`;
+  const retrHtml = s => s.edited && !(st.edit && editing(m.sentences.indexOf(s))) ? `<div class="retr-row"><button class="mini retr" data-retrans aria-label="重新翻译这一句">${st.busy === s.id ? '翻译中…' : '🔄 重新翻译'}</button><span class="muted small">改过${EDW[s.edited] || ''}，${SE.retransDir(s) === 'en2zh' ? '中文' : '英文'}译文没有自动改；只是改错别字就不用点</span></div>` : '';
+  const pEditBar = gi => st.edit?.kind === 'p' && st.edit.gi === gi ? `<div class="row gap pedit-bar"><button class="btn" data-pcancel>取消</button><button class="btn primary grow" data-psave>保存本段修改</button></div>` : '';
+  const pTools = gi => { const g = groups[gi]; const ed = m.sentences.slice(g.start, g.end + 1).filter(s => s.edited).length;
+    return st.edit ? '' : `<button class="mini" data-pedit="${gi}" aria-label="编辑第${gi + 1}段">✏️ 编辑本段</button>${ed > 1 ? `<button class="mini retr" data-pretrans="${gi}">${st.busy === 'p' + gi ? '翻译中…' : `🔄 重新翻译本段（${ed} 句）`}</button>` : ''}`; };
   const rowHtml = (s, i, starred) => `
-      <div class="sent ${m.progress?.done?.[s.id] ? 'done' : ''}" data-i="${i}">
+      <div class="sent ${m.progress?.done?.[s.id] ? 'done' : ''} ${editing(i) ? 'editing' : ''}" data-i="${i}">
         <button class="pbtn" data-play aria-label="播放第${i + 1}句">▶</button>
-        <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}<div class="en">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文，请编辑补上）</span>'}</div>
-          <div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div>${s.tr ? `<div class="trtag">${s.orig === 'zh' ? '中文原文 · 英文为' : ''}${esc(SHORT[s.tr] || '机器翻译')}，可编辑</div>` : ''}</div>
-        <div class="sact">${hasOrig(s) ? '<button class="mini orig" data-orig aria-label="播放原声">🎧 原声</button>' : ''}<button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button><button class="mini" data-practice>练习</button></div>
+        <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}${editing(i) ? editHtml(s, i) : `<div class="en">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文，请编辑补上）</span>'}</div>
+          <div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div>${s.tr ? `<div class="trtag">${s.orig === 'zh' ? '中文原文 · 英文为' : ''}${esc(SHORT[s.tr] || '机器翻译')}，可编辑</div>` : ''}${retrHtml(s)}`}</div>
+        <div class="sact">${st.edit ? '' : `<button class="mini" data-edit aria-label="编辑第${i + 1}句">✏️</button>`}${hasOrig(s) ? '<button class="mini orig" data-orig aria-label="播放原声">🎧 原声</button>' : ''}<button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button><button class="mini" data-practice>练习</button></div>
       </div>`;
   const loopLabel = lv === 'chapter' ? '🔁 整篇循环' : lv === 'para' ? '🔁 循环本段' : '🔁 循环';
   const playLabel = lv === 'chapter' ? '▶ 整篇朗读' : lv === 'para' ? '▶ 朗读本段' : '▶ 听这句';
@@ -80,17 +93,17 @@ export async function render(root, [id], params = {}) {
     if (!N) body = audioUrl ? '' : '<div class="empty"><p>这份材料还没有句子。</p></div>';
     else if (lv === 'chapter') {
       body = playerHtml() + `<div class="progline"><div class="bar"><i style="width:${pr.pct}%"></i></div><span class="muted small">已学 ${pr.done}/${pr.total} 句（${pr.pct}%）${m.progress?.quiz?.['lesson'] != null ? ' · 测验最好 ' + m.progress.quiz['lesson'] + ' 分' : ''}</span></div>
-        <div id="sents">${groups.map((g, gi) => (groups.length > 1 ? `<div class="phead" data-pi="${gi}"><b>第 ${gi + 1} 段</b><span class="muted small">${g.end - g.start + 1} 句${m.progress?.quiz?.['para' + gi] != null ? ' · 测验 ' + m.progress.quiz['para' + gi] + ' 分' : ''}</span><span class="grow"></span><button class="mini" data-pplay="${gi}">▶ 朗读</button><a class="mini" href="${url('para', g.start)}">学习本段 ›</a></div>` : '') + m.sentences.slice(g.start, g.end + 1).map((s, k) => rowHtml(s, g.start + k, starred)).join('')).join('')}</div>`;
+        <div id="sents">${groups.map((g, gi) => (groups.length > 1 ? `<div class="phead" data-pi="${gi}"><b>第 ${gi + 1} 段</b><span class="muted small">${g.end - g.start + 1} 句${m.progress?.quiz?.['para' + gi] != null ? ' · 测验 ' + m.progress.quiz['para' + gi] + ' 分' : ''}</span><span class="grow"></span><button class="mini" data-pplay="${gi}">▶ 朗读</button><a class="mini" href="${url('para', g.start)}">学习本段 ›</a>${pTools(gi)}</div>` : '') + m.sentences.slice(g.start, g.end + 1).map((s, k) => rowHtml(s, g.start + k, starred)).join('') + pEditBar(gi)).join('')}</div>`;
     } else if (lv === 'para') {
       const done = m.sentences.slice(grp.start, grp.end + 1).every(s => m.progress?.done?.[s.id]);
       body = playerHtml() + `<div class="progline"><div class="bar"><i style="width:${pr.pct}%"></i></div><span class="muted small">本章已学 ${pr.done}/${pr.total} 句${m.progress?.quiz?.['para' + pi] != null ? ' · 本段测验 ' + m.progress.quiz['para' + pi] + ' 分' : ''}</span></div>
-        <div id="sents">${m.sentences.slice(grp.start, grp.end + 1).map((s, k) => rowHtml(s, grp.start + k, starred)).join('')}</div>
+        <div id="sents"><div class="phead ptools"><b>第 ${pi + 1} 段</b><span class="grow"></span>${pTools(pi)}</div>${m.sentences.slice(grp.start, grp.end + 1).map((s, k) => rowHtml(s, grp.start + k, starred)).join('')}${pEditBar(pi)}</div>
         <div class="row gap wrap"><a class="btn" href="#/quiz/para:${m.id}:${pi}">📝 本段测验</a><button class="btn ${done ? '' : 'primary'} grow" id="paraDone">${done ? '✓ 已学完（再点取消）' : '✓ 本段学完'}</button></div>` + pager('para');
     } else if (lv === 'sent') {
       const s = m.sentences[si]; const done = !!m.progress?.done?.[s.id];
-      body = playerHtml() + `<div class="bigsent" id="sents"><div class="sent solo ${done ? 'done' : ''}" data-i="${si}">
-          <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}<div class="en big">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文）</span>'}</div><div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div></div>
-          <div class="sact"><button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button></div></div></div>
+      body = playerHtml() + `<div class="bigsent" id="sents"><div class="sent solo ${done ? 'done' : ''} ${editing(si) ? 'editing' : ''}" data-i="${si}">
+          <div class="sbody">${s.speaker ? `<span class="spk-tag">${esc(s.speaker)}</span>` : ''}${editing(si) ? editHtml(s, si) : `<div class="en big">${s.en ? wordsHtml(s.en) : '<span class="muted">（缺英文）</span>'}</div><div class="zh ${st.showZh ? '' : 'hide'}">${esc(s.zh) || '<span class="muted">（缺中文）</span>'}</div>${retrHtml(s)}`}</div>
+          <div class="sact">${st.edit ? '' : `<button class="mini" data-edit aria-label="编辑这一句">✏️</button>`}<button class="mini ${starred.has(s.id) ? 'on' : ''}" data-star aria-label="收藏句子">${starred.has(s.id) ? '★' : '☆'}</button></div></div></div>
         ${hasOrig(s) ? `<div class="row gap"><button class="btn grow" id="origSent">🎧 听原声（录音里这一句）</button></div>` : ''}
         <div class="grid2"><button class="btn primary" id="pract">🎙 跟读与练习</button><button class="btn" id="anaBtn">📖 语法与翻译方法</button>
           <a class="btn" href="#/quiz/sent:${m.id}:${si}">📝 本句测验</a><a class="btn" href="${url('word', si)}">🔤 逐词学习 ›</a></div>
@@ -205,8 +218,17 @@ export async function render(root, [id], params = {}) {
     $('#orig', root)?.addEventListener('click', e => { st.orig = !st.orig; e.currentTarget.textContent = st.orig ? '原录音' : '合成语音'; e.currentTarget.classList.toggle('on', st.orig); });
     $$('[data-pplay]', root).forEach(b => b.onclick = () => { const g = groups[+b.dataset.pplay]; run(g.start, true, [g.start, g.end]); });
     $('#sents', root)?.addEventListener('click', e => {
+      const pe = e.target.closest('[data-pedit]'); if (pe) { stopAll(); st.edit = { kind: 'p', gi: +pe.dataset.pedit }; return draw().then(() => $('.sent.editing textarea', root)?.focus({ preventScroll: true })); }
+      const pr = e.target.closest('[data-pretrans]'); if (pr) { const g = groups[+pr.dataset.pretrans]; return retrans(m.sentences.slice(g.start, g.end + 1).filter(s => s.edited), 'p' + pr.dataset.pretrans); }
+      if (e.target.closest('[data-pcancel]')) { st.edit = null; return draw(); }
+      if (e.target.closest('[data-psave]')) return saveEdits();
       const row = e.target.closest('.sent'); if (!row) return; const i = +row.dataset.i, s = m.sentences[i];
-      if (e.target.closest('[data-play]')) { if (root.classList.contains('playing') && st.cur === i && !st.loopOne) stopAll(); else run(i, false); }
+      if (e.target.closest('[data-edit]')) { stopAll(); st.edit = { kind: 's', i }; draw().then(() => $(`.sent[data-i="${i}"] textarea`, root)?.focus({ preventScroll: true })); }
+      else if (e.target.closest('[data-ecancel]')) { st.edit = null; draw(); }
+      else if (e.target.closest('[data-esave]')) saveEdits();
+      else if (e.target.closest('[data-retrans]')) retrans([s], s.id);
+      else if (row.classList.contains('editing')) return;
+      else if (e.target.closest('[data-play]')) { if (root.classList.contains('playing') && st.cur === i && !st.loopOne) stopAll(); else run(i, false); }
       else if (e.target.closest('[data-practice]')) openPractice(ctx, s);
       else if (e.target.closest('[data-orig]')) { const my = ++st.tok; tts.cancel(); mark(i); root.classList.add('playing'); playOrig(s).catch(err => toast('原声无法播放：' + err.message)).finally(() => { if (my === st.tok) { root.classList.remove('playing'); $$('.sent', root).forEach(x => x.classList.remove('active')); } }); }
       else if (e.target.closest('[data-star]')) { const btn = e.target.closest('[data-star]'); toggleStar(ctx, s).then(on => { btn.textContent = on ? '★' : '☆'; btn.classList.toggle('on', on); }); }
@@ -254,6 +276,37 @@ export async function render(root, [id], params = {}) {
     $('#info', root)?.addEventListener('click', infoSheet);
   };
 
+  /** 保存正在编辑的句子（一句或一段）：只存，不翻译。生词卡 / 句子卡的原句跟着更新，复习进度不动。 */
+  async function saveEdits() {
+    let n = 0; const all = await db.cards.all();
+    for (const row of $$('.sent.editing', root)) {
+      const s = m.sentences[+row.dataset.i]; const en = $('[data-ef="en"]', row).value, zh = $('[data-ef="zh"]', row).value;
+      if (!en.trim() && !zh.trim()) { toast('第 ' + (+row.dataset.i + 1) + ' 句中英文不能都空着（不要的句子可在「编辑句子」里删除）'); return; }
+      const ch = SE.applyEdit(s, { en, zh }); if (!ch.en && !ch.zh) continue; n++;
+      for (const c of SE.syncCards(all, s)) await db.cards.save(c);
+    }
+    st.edit = null;
+    if (n) { await db.materials.save(m); toast(`已保存 ${n} 句修改。译文没有自动改，需要时点旁边的「重新翻译」`, 4000); } else toast('没有改动');
+    draw();
+  }
+  /** 重新翻译（用户点了才做）：AI 已配置用 AI；电脑 Chrome 有端侧翻译用端侧；否则用 MyMemory（先征得同意）。失败不动原译文。 */
+  async function retrans(list, key) {
+    if (st.busy || !list.length) return;
+    const dirs = [...new Set(list.map(SE.retransDir))];
+    let prov = ai.isConfigured() ? 'ai' : null;
+    if (!prov) { const cs = await Promise.all(dirs.map(TR.chromeStatus)); if (cs.every(x => x === 'available')) { try { for (const d of dirs) await TR.chromePrepare(d); prov = 'chrome'; } catch { } } }
+    if (!prov) {
+      if (!session.mmOk && !(await confirmDlg('要重新翻译的句子会发送到第三方公共翻译服务 MyMemory（免费、匿名额度约 5000 字/天）。涉及隐私的内容不要用。继续吗？', { ok: '继续翻译' }))) return;
+      session.mmOk = true; prov = 'mymemory';
+    }
+    st.busy = key; draw();
+    try {
+      const n = await SE.retranslate(list, { provider: prov, translate: TR.translateTexts });
+      const all = await db.cards.all(); for (const s of list) for (const c of SE.syncCards(all, s)) await db.cards.save(c);
+      await db.materials.save(m); toast(`已重新翻译 ${n} 句（${SHORT[prov]}，可再改）`);
+    } catch (e) { toast('重新翻译失败：' + e.message + '。原来的译文没有改动，可以稍后再点「重新翻译」', 6000); }
+    st.busy = false; draw();
+  }
   async function autoWords() {
     const btn = $('#autoWords', root); btn.disabled = true; btn.textContent = '分析中…';
     let cand; try { cand = await dict.candidates(m.sentences); } catch (e) { toast(e.message); btn.disabled = false; return; }
