@@ -84,7 +84,7 @@ export async function render(root, _a, params = {}) {
   const queue = order.slice(); const total = order.length; let done = 0; const scores = []; const tally = { dunno: 0, fuzzy: 0, know: 0, master: 0, ok: 0, bad: 0 }; const byTask = {};
   let st = null, recorder = null, au = null, auTok = 0; const urls = new Map();
   const stopAudio = () => { auTok++; au?.pause(); tts.cancel(); };
-  onLeave(() => { stopAudio(); recorder?.stop().catch(() => { }); document.querySelector('#undobar')?.remove(); });
+  onLeave(() => { stopAudio(); recorder?.stop().catch(() => { }); void sp.abortLiveShadowing(); document.querySelector('#undobar')?.remove(); });
   /** 播放标准答案：句子卡的材料有原声就放原声这一句（慢速 0.75×），否则朗读（TTS） */
   async function playRef(slow = false) {
     const c = st.x.c; stopAudio(); const my = auTok; const inf = c.type === 'sentence' && c.sentenceId ? sentInfo.get(c.sentenceId) : null;
@@ -341,12 +341,15 @@ export async function render(root, _a, params = {}) {
       <div class="diff">${r.tokens.map(t => `<span class="${t.status}" ${t.heard ? `title="你的：${esc(t.heard)}"` : ''}>${esc(t.w)}</span>`).join(' ')}</div>`);
   }
   function selfCheck(why) {
-    st.result = { score: null, mode: 'voice-self' }; $('#ansarea', root).innerHTML = '<div id="ansbox"></div>';
-    $('#fb', root).innerHTML = `<div class="note small">⚠️ ${esc(why)} 已保留你的录音：回放并对照下面的答案，自己判断。</div>${answerHtml()}
+    $('#ansarea', root).innerHTML = '<div id="ansbox"></div>';
+    $('#fb', root).innerHTML = `<div class="note small">⚠️ ${esc(why)} 已保留你的录音：可再跟读一次评分，或回放对照答案自己判断。</div>${answerHtml()}
       ${st.audio ? `<div class="row gap center"><audio controls src="${st.audio}" id="myrec"></audio></div>` : ''}
+      <div class="row gap"><button class="btn grow" id="retryRec">🎙 再跟读一次</button></div>
       <div class="grid2 selfchk"><button class="btn q5" id="selfOk">✓ 说对了</button><button class="btn q1" id="selfBad">✗ 没说对</button></div>`;
     $('#hear', root)?.addEventListener('click', () => speakRef());
-    $('#selfOk', root).onclick = () => finalize(true, '', true); $('#selfBad', root).onclick = () => finalize(false, '', true);
+    $('#retryRec', root).onclick = () => { $('#fb', root).innerHTML = ''; ansBox(); };
+    $('#selfOk', root).onclick = () => { st.result = { score: null, mode: 'voice-self' }; finalize(true, '', true); };
+    $('#selfBad', root).onclick = () => { st.result = { score: null, mode: 'voice-self' }; finalize(false, '', true); };
   }
   const countTask = (x, ok) => { const k = x.qt === 'cloze' ? 'write' : ['parts', 'rootm'].includes(x.qt) ? 'read' : x.qt; const b = byTask[k] || (byTask[k] = { n: 0, ok: 0 }); b.n++; if (ok) b.ok++; };
   async function finalize(ok, html, self = false, { override = false } = {}) {

@@ -32,7 +32,7 @@ export async function runDrill(root, ctx) {
   const audioOf = new Map(); for (const m of mats) if (m.audioId) audioOf.set(m.id, m.audioId);
   const urls = new Map(); let au = null, auTok = 0, recorder = null, pending = null;
   const stopAll = () => { auTok++; au?.pause(); tts.cancel(); };
-  onLeave(() => { stopAll(); recorder?.stop().catch(() => { }); if (pending) commitPending(); document.querySelector('#undobar')?.remove(); });
+  onLeave(() => { stopAll(); recorder?.stop().catch(() => { }); void sp.abortLiveShadowing(); if (pending) commitPending(); document.querySelector('#undobar')?.remove(); });
   const audioUrl = async it => { if ((it.kind !== 'sent' && it.kind !== 'passage') || it.s.t0 == null) return null; const aid = audioOf.get(it.s.materialId); if (!aid) return null;
     if (!urls.has(aid)) { const b = await db.blobs.get('audio:' + aid).catch(() => null); urls.set(aid, b ? URL.createObjectURL(b.blob) : null); } return urls.get(aid); };
   /** 播放：有原声用原声（慢速 0.75×），没有用朗读（TTS） */
@@ -190,8 +190,9 @@ export async function runDrill(root, ctx) {
       micButton($('#area', root), 'en-US', (text, url, why) => {
         $('#area', root).innerHTML = '';
         if (!text) {
-          $('#fb', root).innerHTML = `<div class="note small">⚠️ ${esc(why)} 回放你的录音，对照下面的答案自己判断：</div>${url ? `<div class="row gap center"><audio controls src="${url}" id="myrec"></audio></div>` : ''}${ansHtml()}<div class="grid2 selfchk"><button class="btn q5" id="selfOk">✓ 说对了</button><button class="btn q1" id="selfBad">✗ 没说对</button></div>`;
+          $('#fb', root).innerHTML = `<div class="note small">⚠️ ${esc(why)} 可再跟读一次评分，或回放对照答案自己判断：</div>${url ? `<div class="row gap center"><audio controls src="${url}" id="myrec"></audio></div>` : ''}${ansHtml()}<div class="row gap"><button class="btn grow" id="retryRec">🎙 再跟读一次</button></div><div class="grid2 selfchk"><button class="btn q5" id="selfOk">✓ 说对了</button><button class="btn q1" id="selfBad">✗ 没说对</button></div>`;
           $('#hear2', root)?.addEventListener('click', () => play(it));
+          $('#retryRec', root).onclick = () => { $('#fb', root).innerHTML = ''; answerSay(ch); };
           $('#selfOk', root).onclick = () => result(true, null, `<div class="muted small">自己判断：说对了</div>`); $('#selfBad', root).onclick = () => result(false, null, `<div class="muted small">自己判断：没说对</div>`); return;
         }
         const g = D.fuzzyEn(it.en, text); const ok = g.score >= D.PASS.say;
