@@ -1,5 +1,5 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '116c2bf53c';
+const VERSION = '305c084240';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
