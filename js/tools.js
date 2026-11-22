@@ -122,12 +122,14 @@ export async function openWordSheet(ctx, s, k) {
 // ================= 句 =================
 export function openPractice(ctx, s, opts = {}) {
   const m = ctx.m; let loopTok = 0, recorder = null;
+  const attempts = [...(recs.get(s.id)?.attempts || [])]; // 本句历次跟读分数，不限次数
   const sh = sheet(`
     <div class="pen">${s.en ? wordsHtml(s.en) : ''}</div><div class="pzh">${esc(s.zh)}</div>
     <div class="row gap wrap">${ctx.hasOrig?.(s) ? '<button class="btn" id="p0">🎧 原声</button>' : ''}<button class="btn" id="p1">▶ 听</button><button class="btn" id="p2">🐢 慢速</button><button class="btn tog" id="p3">🔂 循环</button></div>
     <h3>跟读</h3>
     <p class="muted small">🎙 第一次点录音，浏览器会请求「麦克风」权限，请点「允许」。录音只保存在本机内存里，不上传；关闭页面即清除。</p>
     <div class="row gap"><button class="btn primary grow" id="rec">🎙 开始跟读</button></div>
+    <p class="muted small">跟读不限次数，每次都会单独评分，方便对比效果。</p>
     <div id="recres"></div>
     <h3 id="anasec">语法与翻译方法</h3>
     <div id="localpos" class="posrow"><span class="muted small">正在做本地词性标注…</span></div>
@@ -135,7 +137,7 @@ export function openPractice(ctx, s, opts = {}) {
     <div class="row gap wrap" id="anabtn"></div>
     <h3>收藏与表达</h3>
     <div class="row gap wrap"><button class="btn" id="pstar">☆ 收藏句子</button>${aiBtn('pexpr', '地道表达')}</div>
-    <div id="exres"></div>`, { onClose: () => { loopTok++; tts.cancel(); ctx.refresh?.(); } });
+    <div id="exres"></div>`, { onClose: () => { loopTok++; tts.cancel(); void sp.abortLiveShadowing(); ctx.refresh?.(); } });
   const E = id => $(id, sh.el);
   sh.el.addEventListener('click', e => { const w = e.target.closest('[data-w]'); if (w) openWordSheet(ctx, s, +w.dataset.k); });
   const saySent = rate => tts.speak(s.en, { rate }).catch(e => toast(e.message));
@@ -158,6 +160,7 @@ export function openPractice(ctx, s, opts = {}) {
         <div class="legend"><span class="ok">读对</span> <span class="wrong">读错/识别不同</span> <span class="miss">漏读</span></div>`;
     } else if (r.asr) h += `<div class="note">没有识别到声音，请靠近麦克风再试一次。${r.error ? '（' + esc(r.error) + '）' : ''}</div>`;
     else h += `<div class="note">此浏览器不支持语音识别，只能录音回放，无法评分。${r.error ? esc(r.error) : ''}</div>`;
+    if (attempts.length >= 2) h += `<div class="muted small" id="rechist">历次跟读：${attempts.map((a, i) => `第 ${i + 1} 次 <b>${a.score}</b> 分`).join(' · ')}</div>`;
     h += `<div class="muted small">⚠ ${sp.ASR_LABEL}。识别结果受口音、噪音和浏览器影响，分数只是参考，不代表发音水平。</div>`;
     E('#recres').innerHTML = h;
     const mine = E('#myaudio');
@@ -168,7 +171,12 @@ export function openPractice(ctx, s, opts = {}) {
   if (recs.has(s.id)) showRec(recs.get(s.id));
   E('#rec').onclick = async (e) => {
     const btn = e.currentTarget;
-    if (recorder) { btn.disabled = true; const r = await recorder.stop(); recorder = null; btn.disabled = false; btn.textContent = '🎙 再来一次'; btn.classList.remove('recording'); recs.set(s.id, r); showRec(r); return; }
+    if (recorder) {
+      btn.disabled = true; const r = await recorder.stop(); recorder = null; btn.disabled = false;
+      btn.textContent = '🎙 再来一次'; btn.classList.remove('recording');
+      if (r.asr && r.transcript) attempts.push({ score: sp.scoreSpeech(s.en, r.transcript).score, transcript: r.transcript, at: Date.now(), source: r.source || 'browser' });
+      r.attempts = attempts.slice(); recs.set(s.id, r); showRec(r); return;
+    }
     try { tts.cancel(); recorder = await sp.startShadowing({ useAsr: settings.useAsr }); btn.textContent = '■ 说完了，停止并评分'; btn.classList.add('recording'); }
     catch (err) { toast(err.message, 6000); E('#recres').innerHTML = `<div class="note">${esc(err.message)}</div>`; }
   };
