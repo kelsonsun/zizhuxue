@@ -143,6 +143,8 @@ systemctl restart zizhuxue
 ok=0; for _ in $(seq 1 30); do if curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then ok=1; break; fi; sleep 1; done
 [ $ok = 1 ] || { journalctl -u zizhuxue -n 40 --no-pager; die "服务没起来，上面是日志"; }
 echo "    $(curl -fsS http://127.0.0.1:8787/healthz)"
+PUSH_ON="$(curl -fsS http://127.0.0.1:8787/api/v1/health 2>/dev/null | grep -o '"push":true' || true)"
+echo "    学习提醒推送（网页推送，VAPID 密钥首次启动自动生成并存在数据库里）：$( [ -n "$PUSH_ON" ] && echo '已开启' || echo '没开（检查 $ENV_FILE 里的 PUSH_ENABLED）' )"
 
 # 每天凌晨 3 点在线备份数据库（保留 14 份，在 $DATA_DIR/backups）
 cat > /etc/cron.d/zizhuxue-backup <<CRON
