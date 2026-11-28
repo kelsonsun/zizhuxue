@@ -366,3 +366,11 @@ details.help.sec>summary{color:inherit}details.help.sec>summary h2{margin:0}deta
 .prices .pp{float:right;font-weight:700;color:var(--ac,#1f6f5c)}
 #refCoupons{padding-left:1.2em}
 #refCoupons li{margin:4px 0}
+/* v1.11 网页推送强提醒 */
+.rempref{border-top:1px solid var(--line);margin-top:8px}
+.remrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:4px 0}
+.remrow .check{flex:1 1 220px;margin:6px 0}.remrow input[type=time]{width:auto;min-width:110px;min-height:44px}
+.remq{display:flex;align-items:center;gap:6px}
+.remguide{margin:8px 0}.remsteps{margin:6px 0 0;padding-left:22px}.remsteps li{margin:6px 0;line-height:1.5}
+.remico{width:22px;height:22px;vertical-align:-6px;margin-right:4px;border-radius:5px}
+#remindCard [hidden]{display:none!important}
