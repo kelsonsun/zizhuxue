@@ -53,21 +53,30 @@ export async function render(root) {
   <section class="card" id="licCard"></section>
   <section class="card" id="refCard"></section>
   <section class="card" id="remindCard"><h2>⏰ 学习提醒</h2>
-    <label class="check switch"><input type="checkbox" id="remTog" ${settings.remindOn ? 'checked' : ''}> <b>每天按时提醒我学习</b></label>
-    <div class="field"><label for="remAt">提醒时间</label><input type="time" id="remAt" value="${esc(settings.remindAt || '20:00')}" step="300"></div>
-    <label class="check"><input type="checkbox" id="remLate" ${settings.remindLate ? 'checked' : ''}> 到 23:00 还没打卡，再提醒一次（“你把我忘了吗？”）</label>
-    <p class="muted small">提醒语随时间变语气：早上积极、傍晚撒娇、晚上沮丧、23 点“你把我忘了吗”。今天打卡后当天不再提醒。</p>
+    <label class="check switch"><input type="checkbox" id="remTog" ${settings.remindOn ? 'checked' : ''}> <b>打开学习提醒（到点推送到手机 / 电脑通知栏）</b></label>
+    <div id="remGuide"></div>
+    <div class="field"><label for="remAt">每日学习提醒时间</label><input type="time" id="remAt" value="${esc(settings.remindPrefs?.daily?.at || settings.remindAt || '20:00')}" step="300"></div>
+    <label class="check" id="remLateRow"><input type="checkbox" id="remLate" ${settings.remindLate ? 'checked' : ''}> 到 23:00 还没打卡，再提醒一次（“你把我忘了吗？”）</label>
+    <div id="remPush" hidden>
+      <div class="rempref">${['daily', 'review', 'streak', 'evening'].map(k => `<div class="remrow" data-k="${k}"><label class="check"><input type="checkbox" id="rk_${k}"> <span><b>${({ daily: '⏰ 每日学习提醒', review: '📚 复习卡到期提醒', streak: '🔥 连续打卡快断了', evening: '🌙 晚上还没学，再催一次' })[k]}</b><br><span class="muted small">${({ daily: '每天到点叫你学习（时间在上面改）', review: '有到期的卡才发，告诉你几张，点开直接进复习', streak: '已连续打卡、今天还没学够时才发', evening: '今天一题都没做时才发' })[k]}</span></span></label>${k === 'daily' ? '' : `<input type="time" id="rt_${k}" step="300" aria-label="时间">`}</div>`).join('')}</div>
+      <div class="remrow"><label class="check"><input type="checkbox" id="rqOn"> <b>🔕 免打扰时段</b></label><span class="remq"><input type="time" id="rqFrom" step="300" aria-label="从"> 到 <input type="time" id="rqTo" step="300" aria-label="到"></span></div>
+      <div class="field"><label for="rCap">每天最多提醒几次</label><select id="rCap">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} 次</option>`).join('')}</select></div>
+      <p class="small warn" id="remClash"></p>
+      <p class="muted small">防打扰：今天学够了（打卡）就不再催；两条提醒至少隔 45 分钟；到上限就停；免打扰时段里一律不发。</p>
+    </div>
     <p class="small" id="remSt" role="status"></p>
-    <div class="row gap"><button class="btn" id="remTest">🔔 发一条试试</button></div>
+    <div class="row gap wrap"><button class="btn" id="remTest">🔔 发一条试试</button><select id="remTestKind" hidden aria-label="试发哪种"><option value="">测试提醒</option><option value="daily">每日学习</option><option value="review">复习到期</option><option value="streak">连续快断了</option><option value="evening">晚上还没学</option></select></div>
+    <p class="muted small" id="remId"></p>
     <div class="note small" id="remCap"></div>
     ${help('说明：各平台实际能做到什么', `<table class="captbl"><tr><th>平台</th><th>怎么提醒</th><th>App 关着时</th></tr>
-      <tr><td>安卓 App（APK）</td><td>系统本地通知，不需要服务器</td><td>✅ 会提醒（省电模式下可能晚几分钟）</td></tr>
-      <tr><td>电脑客户端（Windows）</td><td>系统通知</td><td>⚠️ 客户端要开着（可最小化）；完全退出不提醒</td></tr>
-      <tr><td>iPhone 主屏应用（iOS 16.4+）</td><td>苹果推送（Web Push），需要推送服务器</td><td>✅ 会提醒——前提是部署了推送服务器</td></tr>
-      <tr><td>iPhone Safari 网页（没加到主屏）</td><td>苹果不允许网页发通知</td><td>❌ 只能打开时看首页提醒语</td></tr>
-      <tr><td>安卓 / 电脑浏览器 + 推送服务器</td><td>浏览器推送</td><td>✅ 会提醒（电脑浏览器要在后台运行）</td></tr>
-      <tr><td>安卓 / 电脑浏览器，没有服务器</td><td>网页开着时到点弹通知；安卓 Chrome 安装版另有定期后台补发</td><td>⚠️ 网页关了基本收不到（后台补发不保证准点）</td></tr></table>
-      <p class="muted small">推送服务器就是自主学的同步服务器（sync-server），推送功能已做好，部署后自动启用；现在的网页版还没有部署服务器。</p>`, 'hRemind')}
+      <tr><td>iPhone 主屏应用（iOS 16.4+，iPad 同）</td><td>苹果推送（网页推送）</td><td>✅ 会提醒，锁屏也能看到</td></tr>
+      <tr><td>iPhone Safari 网页（没加到主屏）/ iOS 16.4 以前</td><td>苹果不允许</td><td>❌ 先「添加到主屏幕」（并升级到 16.4 以上）</td></tr>
+      <tr><td>安卓 Chrome / Edge / Firefox 等浏览器</td><td>浏览器推送</td><td>✅ 会提醒（浏览器被系统“深度省电”杀掉时可能晚到）</td></tr>
+      <tr><td>电脑 Chrome / Edge / Firefox / Safari</td><td>浏览器推送</td><td>⚠️ 浏览器要在后台运行（关掉所有窗口但不退出）</td></tr>
+      <tr><td>安卓 App（APK）</td><td>系统本地通知，不需要服务器</td><td>✅ 会提醒（每日 + 23 点）</td></tr>
+      <tr><td>电脑客户端（Windows）</td><td>系统通知</td><td>⚠️ 客户端要开着（可最小化）</td></tr>
+      <tr><td>微信 / QQ 等内置浏览器、部分国产浏览器、无痕模式</td><td>不支持推送</td><td>❌ 换用浏览器打开</td></tr></table>
+      <p class="muted small">网页推送由自主学自己的推送服务器（zizhuxue.com）发出（不用任何第三方推送服务），内容端到端加密。不用登录、不用开通云同步也能用；第一次没网也可以打开，联网后自动开通。四种提醒（每日 / 复习到期 / 连续快断 / 晚间补提醒）只在网页推送里有；安卓 App 和电脑客户端仍是每日 + 23 点提醒。</p>`, 'hRemind')}
   </section>
 
   <section class="card" id="voiceCard"><h2>英语朗读声音</h2>
@@ -170,21 +179,61 @@ export async function render(root) {
   E('#qkHistMe').onclick = async () => (await import('./quickbox.js')).openHistory({ onPick: r => toast(`「${r.q}」：${r.word ? r.word.zh.split(' | ')[0] : r.tr || (r.rev || []).map(x => x.w).join(', ')}`, 5000) });
   E('#fasr')?.addEventListener('change', e => saveSettings({ forceAsr: e.target.checked }));
   E('#tourAgain').onclick = () => tour.start();
-  // v1.8 学习提醒
-  const R = await import('../remind.js');
-  const fmtNext = it => { if (!it) return ''; const d = new Date(it.at), t = new Date(); const day = d.toDateString() === t.toDateString() ? '今天' : new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1).toDateString() === d.toDateString() ? '明天' : `${d.getMonth() + 1}月${d.getDate()}日`; return `${day} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}「${it.body}」`; };
-  const remCap = async () => { const c = await R.capability(); E('#remCap').innerHTML = `<b>这台设备：</b>${esc({ 'android-app': '安卓 App', 'ios-app': 'iPhone App', electron: '电脑客户端', 'ios-pwa': 'iPhone 主屏应用', 'ios-safari': 'iPhone Safari 网页', web: '浏览器网页' }[c.plat])}${c.ok ? '' : ' · <b class="warn">收不到系统通知</b>'}<br>${c.lines.map(esc).join('<br>')}`; E('#remCap').dataset.route = c.route; E('#remTest').disabled = !c.ok || !settings.remindOn; return c; };
-  const remApply = async ask => {
-    const st = E('#remSt'); st.textContent = settings.remindOn ? '正在安排…' : '';
-    try { const r = await R.apply({ ask }); st.textContent = r.route === 'off' ? '提醒已关闭。' : r.items.length ? `✓ 已安排。下一次：${fmtNext(r.items[0])}` : '✓ 已打开。'; st.dataset.route = r.route; st.className = 'small okt'; }
-    catch (e) { st.textContent = '没能打开提醒：' + e.message; st.className = 'small warn'; if (e.code === 'perm' || e.code === 'unsupported') { await saveSettings({ remindOn: false }); E('#remTog').checked = false; } }
-    await remCap();
+  // v1.8 学习提醒；v1.11 网页推送强提醒（四种提醒、免打扰、每日上限、权限引导、iOS 图文引导）
+  const R = await import('../remind.js'); const RP = await import('../remindplan.js');
+  const hm = ts => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const fmtNext = it => { if (!it) return ''; const d = new Date(it.at), t = new Date(); const day = d.toDateString() === t.toDateString() ? '今天' : new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1).toDateString() === d.toDateString() ? '明天' : `${d.getMonth() + 1}月${d.getDate()}日`; return `${day} ${hm(it.at)}「${it.body}」`; };
+  const platName = { 'android-app': '安卓 App', 'ios-app': 'iPhone App', electron: '电脑客户端', 'ios-pwa': 'iPhone 主屏应用', 'ios-safari': 'iPhone Safari 网页', web: '浏览器网页' };
+  const perm = () => ('Notification' in globalThis ? Notification.permission : 'unsupported');
+  const ip = RP.iosVersion(navigator.userAgent, navigator.maxTouchPoints || 0);
+  const svgShare = '<svg class="remico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round"/></svg>';
+  const svgAdd = '<svg class="remico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="none" stroke="#333" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="#333" stroke-width="2" stroke-linecap="round"/></svg>';
+  const svgGear = '<svg class="remico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="none" stroke="#666" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8" stroke="#666" stroke-width="2" stroke-linecap="round"/></svg>';
+  const appIcon = '<img class="remico" src="icons/icon-192.png" alt="">';
+  const steps = (title, arr) => `<div class="note remguide"><b>${title}</b><ol class="remsteps">${arr.map(x => `<li>${x}</li>`).join('')}</ol></div>`;
+  const guideHtml = c => {
+    if (c.guide === 'ios-old') return steps(`iPhone 要 iOS 16.4 以上才能收推送（你的是 iOS ${ip ? ip.join('.') : '旧版本'}）`, [`${svgGear} 打开手机「设置」→「通用」→「软件更新」，升级到最新系统`, `${svgShare} 回到 Safari 打开自主学，点底部「分享」`, `${svgAdd} 选「添加到主屏幕」→「添加」`, `${appIcon} 从主屏幕的「自主学」图标打开，回到这里打开提醒`]);
+    if (c.guide === 'ios-home') { const b = inst.iosBrowser(); return steps('iPhone 收提醒，要先把自主学添加到主屏幕（苹果的规定）', [`${svgShare} ${b ? `在 ${esc(b)} 里点「分享」按钮（找不到就复制链接，用 Safari 打开）` : '在 Safari 底部点「分享」按钮（方框加向上箭头）'}`, `${svgAdd} 往下滑，点「添加到主屏幕」，再点右上角「添加」`, `${appIcon} 回到手机主屏幕，点「自主学」图标打开`, '🔔 在「我的 → 学习提醒」打开开关，弹出「是否允许通知」时点「允许」']) + '<p class="muted small">提示：从主屏幕打开的自主学和 Safari 里的数据是分开存的；第一次从主屏幕打开时，可以先在 Safari 里「我的 → 数据与备份 → 导出 JSON 备份」，再在主屏应用里「导入备份（合并）」。</p>'; }
+    if (c.guide === 'inapp') return `<div class="note remguide">${esc(c.lines[0])}<br>${esc(c.lines[1] || '')}</div>`;
+    if (c.guide === 'unsupported') return `<div class="note remguide">${c.lines.map(esc).join('<br>')}</div>`;
+    if (['push', 'page'].includes(c.route) && perm() === 'denied') return steps('通知权限被关掉了，要这样重新打开：', c.plat === 'ios-pwa' ? [`${svgGear} 打开手机「设置」→「通知」→ 找到「自主学」→ 打开「允许通知」`, '回到自主学，关掉再打开上面的开关'] : /Android/i.test(navigator.userAgent) ? ['点地址栏左边的图标（🔒 或 ⓘ）→「权限」→「通知」→「允许」', '已经装到主屏的：长按自主学图标 →「应用信息」→「通知」→ 打开', '回到这里，关掉再打开上面的开关'] : ['点浏览器地址栏左边的图标（🔒 或 ⓘ）→「通知」改成「允许」', '刷新页面，再打开上面的开关', 'Windows / Mac 系统设置里也要允许浏览器发通知']);
+    if (['push', 'page'].includes(c.route) && perm() === 'default' && !settings.remindOn) return '<p class="small muted remguide">打开开关后，浏览器会问「是否允许发送通知」，请点「允许」，否则收不到提醒。</p>';
+    return '';
   };
-  await remCap(); if (settings.remindOn) R.apply().then(r => { if (r.items?.[0]) E('#remSt').textContent = `✓ 已安排。下一次：${fmtNext(r.items[0])}`; }).catch(e => { E('#remSt').textContent = '提醒没排上：' + e.message; });
-  E('#remTog').onchange = async e => { await saveSettings({ remindOn: e.target.checked }); remApply(e.target.checked); };
-  E('#remAt').onchange = async e => { if (!/^\d{2}:\d{2}$/.test(e.target.value)) return; await saveSettings({ remindAt: e.target.value }); if (settings.remindOn) remApply(false); };
+  const readPrefs = () => ({ daily: { on: E('#rk_daily').checked, at: E('#remAt').value }, ...Object.fromEntries(['review', 'streak', 'evening'].map(k => [k, { on: E('#rk_' + k).checked, at: E('#rt_' + k).value }])), quiet: { on: E('#rqOn').checked, from: E('#rqFrom').value, to: E('#rqTo').value }, cap: +E('#rCap').value });
+  const fillPrefs = p => { E('#remAt').value = p.daily.at; for (const k of RP.KINDS) { E('#rk_' + k).checked = p[k].on; if (k !== 'daily') E('#rt_' + k).value = p[k].at; } E('#rqOn').checked = p.quiet.on; E('#rqFrom').value = p.quiet.from; E('#rqTo').value = p.quiet.to; E('#rCap').value = String(p.cap); clash(p); };
+  const clash = p => { const c = RP.quietClashes(p); E('#remClash').textContent = c.length ? `注意：${c.map(k => `「${RP.KIND_LABEL[k]}」${p[k].at}`).join('、')} 在免打扰时段（${p.quiet.from}–${p.quiet.to}）里，不会发。` : ''; };
+  const showId = async () => { const i = await R.pushInfo(); E('#remId').textContent = i.id && settings.remindOn ? `本机提醒编号：${i.id.slice(0, 8)}（管理看板可按这个编号给这台设备发测试推送）` : ''; };
+  let remRoute = '';
+  const remCap = async () => {
+    const c = await R.capability(); remRoute = c.route;
+    E('#remCap').innerHTML = `<b>这台设备：</b>${esc(platName[c.plat])}${c.ok ? '' : ' · <b class="warn">收不到系统通知</b>'}<br>${c.lines.map(esc).join('<br>')}`; E('#remCap').dataset.route = c.route;
+    E('#remGuide').innerHTML = guideHtml(c); E('#remGuide').dataset.guide = c.guide || (perm() === 'denied' && ['push', 'page'].includes(c.route) ? 'denied' : '');
+    E('#remPush').hidden = c.route !== 'push'; E('#remLateRow').hidden = c.route === 'push'; E('#remTestKind').hidden = c.route !== 'push' || !settings.remindOn;
+    E('#remTest').disabled = !c.ok || !settings.remindOn; return c;
+  };
+  const showRes = r => { const st = E('#remSt'); st.dataset.route = r.route; st.className = 'small okt';
+    st.textContent = r.route === 'off' ? '提醒已关闭。' : r.pending ? '✓ 已保存。现在连不上服务器（离线），联网后自动开通推送提醒。' : r.route === 'push' ? `✓ 推送提醒已开通。${r.items?.[0] ? '下一次：' + fmtNext(r.items[0]) : ''}` : r.items.length ? `✓ 已安排。下一次：${fmtNext(r.items[0])}` : '✓ 已打开。'; };
+  const remApply = async (ask, permP) => {
+    const st = E('#remSt'); st.textContent = settings.remindOn ? '正在安排…' : '';
+    try { showRes(await R.apply({ ask, permP })); }
+    catch (e) { st.textContent = '没能打开提醒：' + e.message; st.className = 'small warn'; if (e.code === 'perm' || e.code === 'unsupported') { await saveSettings({ remindOn: false }); E('#remTog').checked = false; } }
+    await remCap(); await showId();
+  };
+  fillPrefs(R.prefs());
+  await remCap(); await showId(); if (settings.remindOn) R.apply().then(r => { showRes(r); showId(); }).catch(e => { E('#remSt').textContent = '提醒没排上：' + e.message; });
+  E('#remTog').onchange = e => {
+    const on = e.target.checked; let permP = null;
+    // 权限请求必须在点击的同步调用里发起（iOS Safari / 主屏应用要求，等一下再请求会被当成不是用户点的）
+    if (on && 'Notification' in globalThis && Notification.permission === 'default' && ['push', 'page'].includes(remRoute)) permP = new Promise(res => { try { const r = Notification.requestPermission(res); if (r?.then) r.then(res, () => res('default')); } catch { res('default'); } });
+    saveSettings({ remindOn: on }).then(() => remApply(on, permP));
+  };
+  const onPref = async () => { const p = readPrefs(); clash(RP.normPrefs(p)); if (!/^\d{2}:\d{2}$/.test(p.daily.at)) return;
+    if (remRoute === 'push') { try { const r = await R.updatePrefs(p); if (settings.remindOn) showRes(r); } catch (e) { E('#remSt').textContent = '提醒设置没保存到服务器：' + e.message; E('#remSt').className = 'small warn'; } }
+    else { await R.savePrefs(p); if (settings.remindOn) remApply(false); } };
+  for (const id of ['#remAt', '#rk_daily', '#rk_review', '#rk_streak', '#rk_evening', '#rt_review', '#rt_streak', '#rt_evening', '#rqOn', '#rqFrom', '#rqTo', '#rCap']) E(id).onchange = onPref;
   E('#remLate').onchange = async e => { await saveSettings({ remindLate: e.target.checked }); if (settings.remindOn) remApply(false); };
-  E('#remTest').onclick = async () => { try { await R.test(); toast('已发出一条测试提醒'); } catch (e) { toast('没发出去：' + e.message, 5000); } };
+  E('#remTest').onclick = async () => { try { await R.test(E('#remTestKind').hidden ? undefined : E('#remTestKind').value || undefined); toast('已发出一条测试提醒'); } catch (e) { toast('没发出去：' + e.message, 5000); } };
   E('#doInstall2')?.addEventListener('click', async () => { if (await inst.prompt()) toast('已安装，以后从主屏幕/桌面打开即可'); E('#doInstall2')?.remove(); E('#instHow').textContent = inst.howText(); });
   E('#copyLink2')?.addEventListener('click', async () => toast(await inst.copyLink() ? '链接已复制，到浏览器里粘贴打开' : '复制失败：请点右上角「···」选「在浏览器打开」', 4000));
   E('#mme').onchange = e => { const v = e.target.value.trim(); if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('邮箱格式不对'); saveSettings({ mmEmail: v }); toast(v ? '已保存：MyMemory 额度约 50000 字符/天' : '已清除，匿名使用'); };
