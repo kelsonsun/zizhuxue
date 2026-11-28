@@ -15,5 +15,7 @@ export const FEEDBACK_URL = API_BASE + 'feedback';   // 留空 = 反馈只能用
 export const AI_URL = API_BASE + 'ai/';
 // v1.10 付费与推荐（价格、邀请、优惠码、下单）。留空 = 没有服务器，价格页仍显示默认价格表，但不能邀请 / 核销。
 export const BILLING_URL = API_BASE + 'billing/';
+// v1.11 网页推送强提醒：推送接口所在的服务器（末尾 /api/v1/，接口是 push/…）。和云同步开关分开：不用登录、不用开通云同步也能收提醒。留空 = 没有推送服务器。
+export const PUSH_API = API_BASE;
 // v1.6 反馈收件邮箱：「反馈问题/建议」里“用邮件发送”的收件人。还没定 → 留空（邮件 App 打开后自己填收件人）。定了只改这里。
 export const FEEDBACK_EMAIL = '';

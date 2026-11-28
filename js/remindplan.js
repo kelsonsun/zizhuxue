@@ -54,11 +54,60 @@ export function capability(plat, caps = {}) {
     ? L('native', true, '用手机系统的本地通知：到点由系统弹出，App 关着也会提醒，不需要服务器、不联网。', '安卓 13 以上第一次打开时要允许“通知”权限；省电模式下可能晚几分钟。', '每次打开 App 会重新排好未来 7 天；今天打卡后，今天剩下的提醒自动取消。连续 7 天没打开 App，之后就不再提醒了。')
     : L('none', false, '这个安装包里没有本地通知组件（需要用 1.8.0 及以后的安装包）。');
   if (plat === 'electron') return !caps.plugin ? L('none', false, '这个电脑客户端版本还不支持提醒（需要 1.8.0 及以后的安装包）。') : L('electron', true, '用电脑系统通知（Windows 操作中心 / macOS 通知中心）。', '电脑客户端开着（可以最小化）时到点弹通知；完全退出后不会提醒。', '今天打卡后，今天剩下的提醒自动取消。');
-  if (plat === 'ios-safari') return L('none', false, 'iPhone 的 Safari 网页不能收通知（苹果的限制）。', '要收提醒：先用 Safari「分享 → 添加到主屏幕」（iOS 16.4 以上），从主屏幕图标打开，再回到这里打开提醒；而且需要推送服务器（见下）。', '现在能做到：打开 App 时首页会按时间显示提醒语。');
+  // v1.11：iPhone / iPad 先看系统版本（16.4 以前苹果不给网页推送），再看是不是从主屏幕打开的
+  if ((plat === 'ios-safari' || plat === 'ios-pwa') && caps.iosVer && !iosPushOk(caps.iosVer)) return { ...L('none', false, `你的系统是 iOS ${caps.iosVer.join('.')}，苹果要 iOS 16.4 以上才允许网页推送通知。`, '请到「设置 → 通用 → 软件更新」升级系统，再把自主学「添加到主屏幕」，从主屏幕图标打开后回到这里打开提醒。', '现在能做到：打开 App 时首页会按时间显示提醒语。'), guide: 'ios-old' };
+  if (plat === 'ios-safari') return { ...L('none', false, 'iPhone 的 Safari 网页不能收通知（苹果的限制）。', '要收提醒：先用 Safari「分享 → 添加到主屏幕」（iOS 16.4 以上），从主屏幕图标打开，再回到这里打开提醒；而且需要推送服务器（见下）。', '现在能做到：打开 App 时首页会按时间显示提醒语。'), guide: 'ios-home' };
+  if (caps.inApp) return { ...L('none', false, `你现在是在「${caps.inApp}」里打开的：这里的内置浏览器不能收推送通知。`, '请点右上角「···」→「在浏览器打开」（iPhone 选 Safari，并添加到主屏幕），再回到这里打开提醒。'), guide: 'inapp' };
   if (caps.server && caps.push && caps.notif) return L('push', true,
     plat === 'ios-pwa' ? '主屏应用（iOS 16.4+）通过苹果推送服务收提醒：手机锁屏、App 没打开也会到。' : '通过浏览器推送服务收提醒：浏览器没开着也能到（电脑上浏览器要在后台运行）。',
-    '到点由同步服务器按你设的时间发出；内容端到端加密，推送服务看不到。', '今天打卡后会告诉服务器，今天就不再提醒。');
+    '到点由自主学服务器按你设的时间发出；内容端到端加密，推送服务看不到。', '今天学够了（打卡）会告诉服务器，今天就不再催。');
   if (plat === 'ios-pwa') return L('none', false, '主屏应用要收提醒，必须有推送服务器（苹果只允许通过推送服务发通知）。现在的网址没有配推送服务器，所以收不到。', '服务器端已经做好（sync-server，VAPID 推送），部署后就能用；部署前：打开 App 时首页会按时间显示提醒语。');
   if (caps.notif) return L('page', true, '没有推送服务器：自主学开着（可以在后台标签页）时，到点弹出浏览器通知。', caps.periodic ? '已安装到主屏 / 桌面的安卓 Chrome 还会在后台定期醒来补发（大约每隔一段时间，由浏览器决定，不保证准点）。' : '关掉网页后不会提醒（要关着也能提醒，需要推送服务器或用安卓 / 电脑客户端）。', '首页也会按时间显示提醒语。');
-  return L('none', false, '这个浏览器不支持通知。打开 App 时首页会按时间显示提醒语。');
+  return { ...L('none', false, '这个浏览器不支持通知（部分国产浏览器、隐私 / 无痕模式都不支持）。', '请换用最新版 Chrome、Edge、Safari 或 Firefox 打开自主学，再回到这里打开提醒。打开 App 时首页仍会按时间显示提醒语。'), guide: 'unsupported' };
+}
+
+// ———— v1.11 网页推送强提醒（Web Push）：四种提醒、免打扰、每日上限 ————
+// 服务器（sync-server/reminders.js）也用这里的默认值和校验，前后端一致。
+export const KINDS = ['daily', 'review', 'streak', 'evening'];
+export const KIND_LABEL = { daily: '每日学习提醒', review: '复习卡到期提醒', streak: '连续打卡快断了', evening: '晚上还没学，再催一次' };
+export const KIND_HINT = { daily: '每天这个时间叫你学习', review: '有到期的复习卡才发，带到期张数，点开直接进复习', streak: '已经连续打卡、今天还没学够时才发', evening: '今天一题都还没做时才发' };
+export const DEFAULT_PREFS = Object.freeze({ daily: { on: true, at: '20:00' }, review: { on: true, at: '12:30' }, streak: { on: true, at: '21:30' }, evening: { on: true, at: '22:30' }, quiet: { on: true, from: '23:00', to: '07:30' }, cap: 3 });
+export const CAP_MAX = 6;
+export const minOf = at => { const t = parseAt(at); return t ? t.h * 60 + t.m : null; };
+const okAt = (v, d) => (parseAt(v) ? v : d);
+/** 把用户设置整理成合法的偏好（缺的用默认值，坏的值丢掉）。daily.at 缺省时用旧版的 remindAt */
+export function normPrefs(p = {}, fallbackAt) {
+  const D = DEFAULT_PREFS, out = {};
+  for (const k of KINDS) { const x = p?.[k] || {}; out[k] = { on: x.on === undefined ? D[k].on : !!x.on, at: okAt(x.at, k === 'daily' ? okAt(fallbackAt, D.daily.at) : D[k].at) }; }
+  const q = p?.quiet || {}; out.quiet = { on: q.on === undefined ? D.quiet.on : !!q.on, from: okAt(q.from, D.quiet.from), to: okAt(q.to, D.quiet.to) };
+  const c = Math.round(+p?.cap); out.cap = c >= 1 && c <= CAP_MAX ? c : D.cap;
+  return out;
+}
+/** 服务器收到的偏好要严格：时间写错就报错（不悄悄改掉） */
+export function prefsError(p) {
+  if (!p || typeof p !== 'object') return '提醒设置格式不对';
+  for (const k of KINDS) if (p[k]?.at !== undefined && !parseAt(p[k].at)) return `${KIND_LABEL[k]}的时间格式不对（HH:MM）`;
+  if (p.quiet && ((p.quiet.from !== undefined && !parseAt(p.quiet.from)) || (p.quiet.to !== undefined && !parseAt(p.quiet.to)))) return '免打扰时段格式不对（HH:MM）';
+  if (p.cap !== undefined && !(Math.round(+p.cap) >= 1 && Math.round(+p.cap) <= CAP_MAX)) return `每天最多提醒次数要在 1～${CAP_MAX} 之间`;
+  return '';
+}
+/** 当天第 min 分钟是否落在免打扰时段（可以跨午夜，如 23:00–07:30） */
+export function inQuiet(min, quiet) {
+  if (!quiet?.on) return false; const a = minOf(quiet.from), b = minOf(quiet.to); if (a == null || b == null || a === b) return false;
+  return a < b ? min >= a && min < b : min >= a || min < b;
+}
+/** 设置页提示：哪些提醒的时间落在免打扰时段里（到点不会发） */
+export const quietClashes = p => KINDS.filter(k => p[k]?.on && inQuiet(minOf(p[k].at), p.quiet));
+/** iOS 版本 [主, 次]（不是 iPhone / iPad 返回 null）。iPad「桌面版网站」UA 像 Mac，用 Safari 的 Version/ 代替（两者一致） */
+export function iosVersion(ua = '', maxTouchPoints = 0) {
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1); if (!ios) return null;
+  const m = /\bOS (\d+)[_.](\d+)/.exec(ua) || /\bVersion\/(\d+)\.(\d+)/.exec(ua); return m ? [+m[1], +m[2]] : null;
+}
+export const iosPushOk = v => !v || v[0] > 16 || (v[0] === 16 && v[1] >= 4);
+/** 本机给服务器报的「今天」状态：met 打卡了、studied 今天做过题、streak 连续天数、freezes 冰块、due {日期: 到那天为止到期的卡数}（未来 8 天，按本地日期） */
+export function dueMap(cards, now = Date.now(), days = 8) {
+  const base = new Date(now); const todayN = Math.floor(Date.UTC(base.getFullYear(), base.getMonth(), base.getDate()) / 86400000);
+  const dues = (cards || []).filter(c => c && !c.sch?.mastered && c.sch && (c.sch.seen || 0) > 0).map(c => c.sch.due ?? 0);
+  const out = {}; for (let d = 0; d < days; d++) { const n = todayN + d; out[new Date(n * 86400000).toISOString().slice(0, 10)] = dues.filter(x => x <= n).length; }
+  return out;
 }

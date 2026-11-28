@@ -26,3 +26,5 @@ export const feedbackUrl = (o = runtime()) => allowed(D.FEEDBACK_URL || '', o);
 export const aiUrl = (o = runtime()) => { const u = allowed(D.AI_URL || '', o); return u && !u.endsWith('/') ? u + '/' : u; };
 /** v1.10 付费 / 推荐接口（末尾带 /），同样的过滤规则 */
 export const billingUrl = (o = runtime()) => { const u = allowed(D.BILLING_URL || '', o); return u && !u.endsWith('/') ? u + '/' : u; };
+/** v1.11 网页推送强提醒的服务器（/api/v1/，末尾带 /），同样的过滤规则 */
+export const pushApi = (o = runtime()) => { const u = allowed(D.PUSH_API || '', o); return u && !u.endsWith('/') ? u + '/' : u; };
