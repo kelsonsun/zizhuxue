@@ -1,5 +1,5 @@
 // Service Worker：预缓存应用外壳 + 离线词典；识别/PDF/Word 组件首次使用时缓存（或在“我的”里一键预缓存）。
-const VERSION = '305c084240';
+const VERSION = '7fb781b68f';
 const CACHE = 'zizhuxue-' + VERSION;
 // 识别/PDF/Word 组件（vendor/ 下按需加载的大文件）放在不随版本变化的缓存里：应用更新后仍可离线使用，不必重新下载 15MB。
 const VENDOR = 'zizhuxue-vendor-1';
@@ -78,7 +78,27 @@ const ICON = 'icons/icon-192.png';
 self.addEventListener('push', e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() || '' }; }
   // iOS / Chrome 要求每条推送都显示通知（userVisibleOnly）
-  e.waitUntil(self.registration.showNotification(d.title || '自主学', { body: d.body || '来学一会儿英语吧', tag: d.tag || 'zzx-remind', renotify: true, icon: ICON, badge: ICON, data: { url: d.url || './#/' } }));
+  // v1.11 强提醒：同类提醒替换旧的并重新响铃震动；「连续快断了 / 晚上还没学」在电脑上停在屏幕上直到点掉；复习提醒在图标上显示到期张数
+  const o = { body: d.body || '来学一会儿英语吧', tag: d.tag || 'zzx-remind', renotify: true, icon: ICON, badge: ICON, timestamp: Date.now(), data: { url: d.url || './#/', kind: d.kind || '' } };
+  if (d.sticky) o.requireInteraction = true;
+  if (d.kind && d.kind !== 'test') o.vibrate = [300, 120, 300];
+  if (d.kind === 'review') o.actions = [{ action: 'open', title: '去复习' }]; else if (d.kind && d.kind !== 'test') o.actions = [{ action: 'open', title: '现在去学' }];
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(d.title || '自主学', o),
+    d.kind === 'review' && d.count > 0 && self.navigator.setAppBadge ? self.navigator.setAppBadge(d.count).catch(() => { }) : null,
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => cs.forEach(c => c.postMessage({ type: 'zzx-push', kind: d.kind || '', title: d.title || '', body: o.body }))), // 网页开着时让页面知道（测试 / 刷新提示）
+  ]));
+});
+// v1.11 浏览器换了推送地址（订阅过期 / 被浏览器轮换）：自动重新订阅并告诉服务器，用户不用重新打开提醒
+self.addEventListener('pushsubscriptionchange', e => {
+  e.waitUntil((async () => {
+    const pu = await idbMeta('remindPush'); if (!pu?.url || !pu.body) return;
+    let sub = e.newSubscription; if (!sub) { const opt = e.oldSubscription?.options; if (!opt) return; sub = await self.registration.pushManager.subscribe(opt); }
+    const j = sub.toJSON(); const post = (path, body) => fetch(new URL(path, pu.url).href, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await post('push/subscribe', { ...pu.body, subscription: { endpoint: j.endpoint, keys: j.keys } }); if (!r.ok) return;
+    const k = await r.json(); if (pu.endpoint && pu.endpoint !== j.endpoint) await post('push/unsubscribe', { endpoint: pu.endpoint }).catch(() => { });
+    await idbMeta('remindPush', { ...pu, endpoint: j.endpoint, id: k.id, sig: '' });
+  })().catch(() => { }));
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
